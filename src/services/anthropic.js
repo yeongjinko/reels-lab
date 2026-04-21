@@ -7,10 +7,22 @@ const analyzeScriptFn = httpsCallable(functions, 'analyzeScript');
 const generateScriptFn = httpsCallable(functions, 'generateScript');
 const refineSentenceFn = httpsCallable(functions, 'refineSentence');
 const refineAnalysisFn = httpsCallable(functions, 'refineAnalysis');
+const generateContextOptionsFn = httpsCallable(functions, 'generateContextOptions');
+const updateSentencesWithContextFn = httpsCallable(functions, 'updateSentencesWithContext');
 
-export async function analyzeReference(text, shopType, wordContexts = []) {
-  const result = await analyzeScriptFn({ text, shopType, wordContexts });
-  return result.data; // { success, needsContext, data?, words? }
+export async function analyzeReference(text, shopType) {
+  const result = await analyzeScriptFn({ text, shopType });
+  return result.data; // { success, needsContext, words?, data }
+}
+
+export async function generateContextOptions(word, sentence) {
+  const result = await generateContextOptionsFn({ word, sentence });
+  return result.data.data; // { options: [{ label, effect }] }
+}
+
+export async function updateSentencesWithContext(sentences, contextMap) {
+  const result = await updateSentencesWithContextFn({ sentences, contextMap });
+  return result.data.data.updates || []; // [{ text, effect }]
 }
 
 export async function refineSentence(text, effect, feedback) {

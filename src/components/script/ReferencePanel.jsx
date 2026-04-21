@@ -1,5 +1,11 @@
-import React, { useState } from 'react';
-import { analyzeReference, refineSentence, refineAnalysis } from '../../services/anthropic';
+import React, { useState, useEffect } from 'react';
+import {
+  analyzeReference,
+  generateContextOptions,
+  updateSentencesWithContext,
+  refineSentence,
+  refineAnalysis,
+} from '../../services/anthropic';
 import { useApp } from '../../App';
 
 const TAG_STYLES = {
@@ -9,18 +15,167 @@ const TAG_STYLES = {
   CTA: 'bg-red-100 text-red-700',
 };
 
-const CONTEXT_OPTIONS = [
-  { id: 'premium', label: '고가 선망 브랜드', desc: '예: 룰루레몬, 나이키' },
-  { id: 'budget', label: '저가/가성비 브랜드', desc: '' },
-  { id: 'item', label: '특정 아이템/소재명', desc: '' },
-  { id: 'custom', label: '직접 입력', desc: '' },
-];
+function highlightWord(sentence, word) {
+  if (!sentence || !word) return sentence;
+  const regex = new RegExp(`(${word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi');
+  const parts = sentence.split(regex);
+  return parts.map((part, i) =>
+    regex.test(part)
+      ? <mark key={i} className="bg-yellow-200 text-gray-900 font-semibold rounded px-0.5">{part}</mark>
+      : part
+  );
+}
+
+function WordContextPopup({ word, sentence, totalCount, currentIndex, onAnswer, onSkip }) {
+  const [options, setOptions] = useState(null);
+  const [optionsLoading, setOptionsLoading] = useState(true);
+  const [optionsError, setOptionsError] = useState('');
+  const [selected, setSelected] = useState(null);
+  const [customInput, setCustomInput] = useState('');
+
+  useEffect(() => {
+    let cancelled = false;
+    setOptionsLoading(true);
+    setOptionsError('');
+    setOptions(null);
+    setSelected(null);
+    setCustomInput('');
+
+    generateContextOptions(word, sentence)
+      .then((data) => { if (!cancelled) setOptions(data.options); })
+      .catch(() => { if (!cancelled) setOptionsError('선택지를 불러오지 못했어요. 직접 입력해주세요.'); })
+      .finally(() => { if (!cancelled) setOptionsLoading(false); });
+
+    return () => { cancelled = true; };
+  }, [word, sentence]);
+
+  const isLast = currentIndex === totalCount - 1;
+  const canProceed = selected !== null && (selected !== 'custom' || customInput.trim());
+
+  function handleProceed() {
+    if (!canProceed) return;
+    const label = selected === 'custom' ? customInput.trim() : options[selected].label;
+    onAnswer({ word, label });
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-md flex flex-col max-h-[90vh]">
+
+        {/* 헤더 */}
+        <div className="px-6 pt-6 pb-4 flex-shrink-0">
+          {totalCount > 1 && (
+            <div className="flex gap-1.5 mb-4">
+              {Array.from({ length: totalCount }, (_, i) => (
+                <div
+                  key={i}
+                  className={`h-1 flex-1 rounded-full transition-colors ${
+                    i <= currentIndex ? 'bg-indigo-500' : 'bg-gray-200'
+                  }`}
+                />
+              ))}
+            </div>
+          )}
+
+          {/* 원문 문장 */}
+          {sentence && (
+            <div className="bg-gray-50 border border-gray-200 rounded-xl px-3.5 py-2.5 mb-4">
+              <p className="text-xs text-gray-500 font-medium mb-1">원문 문장</p>
+              <p className="text-xs text-gray-700 leading-relaxed">{highlightWord(sentence, word)}</p>
+            </div>
+          )}
+
+          <h2 className="text-base font-bold text-gray-900">
+            이 영상에서{' '}
+            <span className="text-indigo-600">"{word}"</span>는{' '}
+            어떤 의미로 쓰였나요?
+          </h2>
+        </div>
+
+        {/* 선택지 */}
+        <div className="flex-1 overflow-y-auto px-6 pb-2">
+          {optionsLoading ? (
+            <div className="flex flex-col items-center justify-center py-10 gap-2">
+              <div className="w-5 h-5 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
+              <p className="text-xs text-gray-400">선택지 생성 중...</p>
+            </div>
+          ) : (
+            <div className="flex flex-col gap-2">
+              {optionsError && (
+                <p className="text-xs text-amber-600 bg-amber-50 rounded-lg px-3 py-2 mb-1">{optionsError}</p>
+              )}
+              {options?.map((opt, i) => (
+                <button
+                  key={i}
+                  onClick={() => setSelected(i)}
+                  className={`w-full text-left px-4 py-3 rounded-xl border-2 transition-all ${
+                    selected === i
+                      ? 'bg-indigo-50 border-indigo-400'
+                      : 'bg-white border-gray-200 hover:border-gray-300'
+                  }`}
+                >
+                  <p className={`text-sm font-semibold ${selected === i ? 'text-indigo-800' : 'text-gray-800'}`}>
+                    {opt.label}
+                  </p>
+                  <p className={`text-xs mt-0.5 leading-relaxed ${selected === i ? 'text-indigo-600' : 'text-gray-400'}`}>
+                    {opt.effect}
+                  </p>
+                </button>
+              ))}
+
+              {/* 직접 입력 */}
+              <button
+                onClick={() => setSelected('custom')}
+                className={`w-full text-left px-4 py-3 rounded-xl border-2 transition-all ${
+                  selected === 'custom'
+                    ? 'bg-indigo-50 border-indigo-400'
+                    : 'bg-white border-gray-200 hover:border-gray-300'
+                }`}
+              >
+                <p className={`text-sm font-semibold ${selected === 'custom' ? 'text-indigo-800' : 'text-gray-800'}`}>
+                  직접 입력
+                </p>
+              </button>
+              {selected === 'custom' && (
+                <input
+                  type="text"
+                  value={customInput}
+                  onChange={(e) => setCustomInput(e.target.value)}
+                  placeholder={`"${word}"에 대해 설명해주세요`}
+                  className="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                  autoFocus
+                />
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* 버튼 */}
+        <div className="px-6 pt-3 pb-5 border-t border-gray-100 flex flex-col gap-2 flex-shrink-0">
+          <button
+            onClick={handleProceed}
+            disabled={!canProceed || optionsLoading}
+            className="w-full bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-300 disabled:cursor-not-allowed text-white font-semibold py-2.5 rounded-xl transition-colors"
+          >
+            {isLast ? '맥락 반영해서 분석하기' : '다음'}
+          </button>
+          <button
+            onClick={onSkip}
+            className="w-full text-gray-400 hover:text-gray-600 text-sm py-2 transition-colors"
+          >
+            모르겠으면 넘어가기
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 function SentenceCard({ sentence, onUpdate }) {
   const [feedbackOpen, setFeedbackOpen] = useState(false);
   const [feedbackText, setFeedbackText] = useState('');
   const [loading, setLoading] = useState(false);
-  const [applied, setApplied] = useState(false);
+  const [feedbackApplied, setFeedbackApplied] = useState(false);
   const [error, setError] = useState('');
 
   async function handleApply() {
@@ -30,7 +185,7 @@ function SentenceCard({ sentence, onUpdate }) {
     try {
       const result = await refineSentence(sentence.text, sentence.effect, feedbackText.trim());
       onUpdate(result.effect);
-      setApplied(true);
+      setFeedbackApplied(true);
       setFeedbackOpen(false);
       setFeedbackText('');
     } catch {
@@ -47,11 +202,18 @@ function SentenceCard({ sentence, onUpdate }) {
           {sentence.tag}
         </span>
         <p className="text-sm text-gray-800 font-medium leading-snug flex-1">{sentence.text}</p>
-        {applied && (
-          <span className="text-[10px] font-semibold bg-emerald-100 text-emerald-600 px-2 py-0.5 rounded-full flex-shrink-0">
-            피드백 반영됨
-          </span>
-        )}
+        <div className="flex flex-col gap-1 flex-shrink-0">
+          {sentence.contextApplied && (
+            <span className="text-[10px] font-semibold bg-blue-100 text-blue-600 px-2 py-0.5 rounded-full whitespace-nowrap">
+              맥락 반영됨
+            </span>
+          )}
+          {feedbackApplied && (
+            <span className="text-[10px] font-semibold bg-emerald-100 text-emerald-600 px-2 py-0.5 rounded-full whitespace-nowrap">
+              피드백 반영됨
+            </span>
+          )}
+        </div>
       </div>
       <p className="text-xs text-gray-500 leading-relaxed pl-0.5 mb-2.5">{sentence.effect}</p>
 
@@ -72,9 +234,7 @@ function SentenceCard({ sentence, onUpdate }) {
               disabled={!feedbackText.trim() || loading}
               className="flex items-center gap-1.5 text-xs font-semibold bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-300 text-white px-3 py-1.5 rounded-lg transition-colors"
             >
-              {loading ? (
-                <div className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />
-              ) : null}
+              {loading && <div className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />}
               반영하기
             </button>
             <button
@@ -100,112 +260,37 @@ function SentenceCard({ sentence, onUpdate }) {
   );
 }
 
-function WordContextPopup({ word, totalCount, currentIndex, onAnswer, onSkip }) {
-  const [selected, setSelected] = useState(null);
-  const [customInput, setCustomInput] = useState('');
-
-  const canConfirm = selected && (selected !== 'custom' || customInput.trim());
-
-  function handleConfirm() {
-    if (!canConfirm) return;
-    onAnswer({
-      word,
-      contextType: selected,
-      customDesc: selected === 'custom' ? customInput.trim() : '',
-    });
-  }
-
-  return (
-    <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-      <div className="bg-white rounded-2xl shadow-xl w-full max-w-md">
-        <div className="px-6 pt-6 pb-5">
-          {totalCount > 1 && (
-            <p className="text-xs text-gray-400 mb-2">{currentIndex + 1} / {totalCount}</p>
-          )}
-          <p className="text-xs text-gray-500 mb-1">더 정확한 분석을 위해</p>
-          <h2 className="text-base font-bold text-gray-900 mb-5">
-            <span className="text-indigo-600">"{word}"</span>이(가) 무엇인지 알려주시면
-            더 정확하게 분석할 수 있어요
-          </h2>
-
-          <div className="flex flex-col gap-2">
-            {CONTEXT_OPTIONS.map((opt) => (
-              <button
-                key={opt.id}
-                onClick={() => setSelected(opt.id)}
-                className={`w-full text-left px-4 py-3 rounded-xl border-2 transition-all ${
-                  selected === opt.id
-                    ? 'bg-indigo-50 border-indigo-400 text-indigo-800'
-                    : 'bg-white border-gray-200 text-gray-700 hover:border-gray-300'
-                }`}
-              >
-                <span className="font-medium text-sm">{opt.label}</span>
-                {opt.desc && (
-                  <span className="text-xs text-gray-400 ml-1.5">{opt.desc}</span>
-                )}
-              </button>
-            ))}
-          </div>
-
-          {selected === 'custom' && (
-            <input
-              type="text"
-              value={customInput}
-              onChange={(e) => setCustomInput(e.target.value)}
-              placeholder={`"${word}"에 대해 설명해주세요`}
-              className="mt-3 w-full border border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-              autoFocus
-            />
-          )}
-        </div>
-
-        <div className="px-6 pb-5 flex flex-col gap-2">
-          <button
-            onClick={handleConfirm}
-            disabled={!canConfirm}
-            className="w-full bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-300 disabled:cursor-not-allowed text-white font-semibold py-2.5 rounded-xl transition-colors"
-          >
-            이 맥락으로 분석하기
-          </button>
-          <button
-            onClick={onSkip}
-            className="w-full text-gray-400 hover:text-gray-600 text-sm py-2 transition-colors"
-          >
-            모르겠으면 그냥 넘어가기
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 export default function ReferencePanel({ onAnalysisDone }) {
   const { userData } = useApp();
   const [text, setText] = useState('');
   const [loading, setLoading] = useState(false);
   const [analysis, setAnalysis] = useState(null);
   const [error, setError] = useState('');
+
+  // 맥락 수집 플로우
+  const [baseAnalysis, setBaseAnalysis] = useState(null);
   const [contextQueue, setContextQueue] = useState([]);
-  const [wordContexts, setWordContexts] = useState([]);
-  const [pendingRequest, setPendingRequest] = useState(null);
+  const [contextAnswers, setContextAnswers] = useState([]);
+
+  // 전체 피드백
   const [overallFeedback, setOverallFeedback] = useState({ open: false, text: '', loading: false, error: '' });
 
-  const shopType =
-    userData?.shopType === 'both' ? 'women' : userData?.shopType || 'women';
+  const shopType = userData?.shopType === 'both' ? 'women' : userData?.shopType || 'women';
 
   async function handleAnalyzeClick() {
     if (!text.trim()) return;
     setLoading(true);
     setError('');
     setAnalysis(null);
+    setBaseAnalysis(null);
     setContextQueue([]);
-    setWordContexts([]);
+    setContextAnswers([]);
 
     try {
       const result = await analyzeReference(text.trim(), shopType);
-      if (result.needsContext) {
-        setPendingRequest({ text: text.trim(), shopType });
-        setContextQueue(result.words || []);
+      if (result.needsContext && result.words?.length > 0) {
+        setBaseAnalysis(result.data);
+        setContextQueue(result.words);
         setLoading(false);
       } else {
         setAnalysis(result.data);
@@ -218,35 +303,52 @@ export default function ReferencePanel({ onAnalysisDone }) {
     }
   }
 
-  async function runPhaseTwo(contexts) {
-    setLoading(true);
-    try {
-      const result = await analyzeReference(pendingRequest.text, pendingRequest.shopType, contexts);
-      setAnalysis(result.data);
-      onAnalysisDone?.(result.data);
-    } catch (e) {
-      setError(e.message || '분석 중 오류가 발생했습니다.');
-    } finally {
-      setLoading(false);
-      setPendingRequest(null);
-    }
-  }
-
   function handleWordAnswer(answer) {
-    const updatedContexts = [...wordContexts, answer];
-    setWordContexts(updatedContexts);
-    advanceQueue(updatedContexts);
+    const newAnswers = [...contextAnswers, answer];
+    setContextAnswers(newAnswers);
+    advanceQueue(newAnswers);
   }
 
   function handleWordSkip() {
-    advanceQueue(wordContexts);
+    advanceQueue(contextAnswers);
   }
 
-  function advanceQueue(currentContexts) {
+  function advanceQueue(currentAnswers) {
     const nextQueue = contextQueue.slice(1);
     setContextQueue(nextQueue);
     if (nextQueue.length === 0) {
-      runPhaseTwo(currentContexts);
+      runContextUpdate(currentAnswers);
+    }
+  }
+
+  async function runContextUpdate(answers) {
+    const validAnswers = answers.filter((a) => a.label);
+    if (validAnswers.length === 0) {
+      setAnalysis(baseAnalysis);
+      onAnalysisDone?.(baseAnalysis);
+      setBaseAnalysis(null);
+      return;
+    }
+
+    setLoading(true);
+    const contextMap = Object.fromEntries(validAnswers.map((a) => [a.word, a.label]));
+
+    try {
+      const updates = await updateSentencesWithContext(baseAnalysis.sentences, contextMap);
+      const newSentences = baseAnalysis.sentences.map((s) => {
+        const update = updates.find((u) => u.text === s.text);
+        return update ? { ...s, effect: update.effect, contextApplied: true } : s;
+      });
+      const newAnalysis = { ...baseAnalysis, sentences: newSentences };
+      setAnalysis(newAnalysis);
+      onAnalysisDone?.(newAnalysis);
+    } catch (e) {
+      setError(e.message || '맥락 반영 중 오류가 발생했습니다.');
+      setAnalysis(baseAnalysis);
+      onAnalysisDone?.(baseAnalysis);
+    } finally {
+      setLoading(false);
+      setBaseAnalysis(null);
     }
   }
 
@@ -278,7 +380,11 @@ export default function ReferencePanel({ onAnalysisDone }) {
     }
   }
 
+  // 현재 팝업에 보여줄 단어와 해당 문장
   const currentWord = contextQueue[0];
+  const currentSentence = currentWord
+    ? baseAnalysis?.sentences?.find((s) => s.text.includes(currentWord))?.text || ''
+    : '';
 
   return (
     <>
@@ -330,6 +436,7 @@ export default function ReferencePanel({ onAnalysisDone }) {
 
           {analysis && (
             <div className="flex flex-col gap-4">
+              {/* 후킹 공식 */}
               <div className="bg-indigo-50 border border-indigo-200 rounded-xl p-4">
                 <div className="flex items-center gap-2 mb-2">
                   <svg className="w-4 h-4 text-indigo-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -338,9 +445,7 @@ export default function ReferencePanel({ onAnalysisDone }) {
                   <span className="text-xs font-bold text-indigo-700 uppercase tracking-wider">후킹 공식</span>
                   {analysis.hookFormulaType && (
                     <span className={`ml-auto text-[11px] font-semibold px-2 py-0.5 rounded-full ${
-                      analysis.isNewType
-                        ? 'bg-amber-100 text-amber-700'
-                        : 'bg-indigo-100 text-indigo-600'
+                      analysis.isNewType ? 'bg-amber-100 text-amber-700' : 'bg-indigo-100 text-indigo-600'
                     }`}>
                       {analysis.isNewType ? '✦ 새 유형 · ' : ''}{analysis.hookFormulaType}
                     </span>
@@ -359,6 +464,7 @@ export default function ReferencePanel({ onAnalysisDone }) {
                 )}
               </div>
 
+              {/* 문장별 분석 */}
               <div>
                 <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">문장별 분석</p>
                 <div className="flex flex-col gap-2.5">
@@ -427,8 +533,9 @@ export default function ReferencePanel({ onAnalysisDone }) {
       {currentWord && (
         <WordContextPopup
           word={currentWord}
-          totalCount={contextQueue.length + wordContexts.length}
-          currentIndex={wordContexts.length}
+          sentence={currentSentence}
+          totalCount={contextQueue.length + contextAnswers.length}
+          currentIndex={contextAnswers.length}
           onAnswer={handleWordAnswer}
           onSkip={handleWordSkip}
         />

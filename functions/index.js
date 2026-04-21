@@ -316,11 +316,11 @@ exports.analyzeScript = onCall(
       });
       const result = parseJsonFromText(message.content[0].text);
 
+      const { needsContext: _nc, ...analysisData } = result;
       const contextWords = Array.isArray(result.needsContext) ? result.needsContext : [];
       if (!hasContext && contextWords.length > 0) {
-        return { success: true, needsContext: true, words: contextWords };
+        return { success: true, needsContext: true, words: contextWords, data: analysisData };
       }
-      const { needsContext: _nc, ...analysisData } = result;
       return { success: true, needsContext: false, data: analysisData };
     } catch (e) {
       console.error('analyzeScript error:', e);
@@ -411,6 +411,95 @@ exports.refineAnalysis = onCall(
       console.error('refineAnalysis error:', e);
       if (e instanceof HttpsError) throw e;
       throw new HttpsError('internal', '전체 분석 수정 중 오류가 발생했습니다.');
+    }
+  }
+);
+
+const CONTEXT_OPTIONS_PROMPT = `너는 릴스 대본 분석 전문가야.
+아래 문장에서 특정 단어가 어떤 의미/맥락으로 사용됐는지
+가능한 해석 4가지를 생성해줘.
+
+각 선택지:
+- label: 해석 설명 (15자 이내, 간결하게)
+- effect: 이 맥락으로 해석할 때 릴스 분석에 미치는 영향 (1~2문장)
+
+반드시 JSON으로만 반환:
+{
+  "options": [
+    { "label": "선택지 설명", "effect": "이 맥락으로 해석하면 분석에 미치는 영향" }
+  ]
+}`;
+
+const UPDATE_SENTENCES_PROMPT = `너는 릴스 대본 분석 전문가야.
+아래 단어들의 맥락 정보가 추가됐어.
+이 맥락을 반영해서 해당 문장들의 분석을 더 정확하고 깊게 업데이트해줘.
+
+기존 분석에서 이 단어가 포함된 문장들만 찾아서
+맥락을 반영한 더 깊은 분석으로 교체해줘.
+
+반드시 JSON으로만 반환:
+{
+  "updates": [
+    { "text": "문장 원문 (그대로)", "effect": "맥락 반영된 새 분석" }
+  ]
+}`;
+
+exports.generateContextOptions = onCall(
+  { secrets: [anthropicApiKey] },
+  async (request) => {
+    if (!request.auth) throw new HttpsError('unauthenticated', '로그인이 필요합니다.');
+    const { word, sentence } = request.data;
+    if (!word || !sentence) throw new HttpsError('invalid-argument', '단어와 문장이 필요합니다.');
+
+    const client = new Anthropic({ apiKey: anthropicApiKey.value() });
+    try {
+      const message = await client.messages.create({
+        model: MODEL,
+        max_tokens: 1024,
+        system: CONTEXT_OPTIONS_PROMPT,
+        messages: [{ role: 'user', content: `단어: ${word}\n문장: ${sentence}` }],
+      });
+      const result = parseJsonFromText(message.content[0].text);
+      return { success: true, data: result };
+    } catch (e) {
+      console.error('generateContextOptions error:', e);
+      if (e instanceof HttpsError) throw e;
+      throw new HttpsError('internal', '선택지 생성 중 오류가 발생했습니다.');
+    }
+  }
+);
+
+exports.updateSentencesWithContext = onCall(
+  { secrets: [anthropicApiKey] },
+  async (request) => {
+    if (!request.auth) throw new HttpsError('unauthenticated', '로그인이 필요합니다.');
+    const { sentences, contextMap } = request.data;
+    if (!sentences || !contextMap) throw new HttpsError('invalid-argument', '필수 값이 누락됐습니다.');
+
+    const client = new Anthropic({ apiKey: anthropicApiKey.value() });
+    const contextStr = Object.entries(contextMap)
+      .map(([word, label]) => `- ${word}: ${label}`)
+      .join('\n');
+    const sentencesStr = sentences
+      .map((s) => `[${s.tag}] ${s.text} → ${s.effect}`)
+      .join('\n');
+
+    try {
+      const message = await client.messages.create({
+        model: MODEL,
+        max_tokens: 2048,
+        system: UPDATE_SENTENCES_PROMPT,
+        messages: [{
+          role: 'user',
+          content: `맥락 정보:\n${contextStr}\n\n기존 문장별 분석:\n${sentencesStr}`,
+        }],
+      });
+      const result = parseJsonFromText(message.content[0].text);
+      return { success: true, data: result };
+    } catch (e) {
+      console.error('updateSentencesWithContext error:', e);
+      if (e instanceof HttpsError) throw e;
+      throw new HttpsError('internal', '맥락 반영 중 오류가 발생했습니다.');
     }
   }
 );
