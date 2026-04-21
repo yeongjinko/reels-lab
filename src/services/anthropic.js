@@ -15,8 +15,8 @@ export async function analyzeReference(text, shopType) {
   return result.data; // { success, needsContext, words?, data }
 }
 
-export async function generateContextOptions(word, sentence) {
-  const result = await generateContextOptionsFn({ word, sentence });
+export async function generateContextOptions(word, sentence, shopType) {
+  const result = await generateContextOptionsFn({ word, sentence, shopType });
   return result.data.data; // { options: [{ label, effect }] }
 }
 

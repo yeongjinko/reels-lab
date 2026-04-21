@@ -26,28 +26,26 @@ function highlightWord(sentence, word) {
   );
 }
 
-function WordContextPopup({ word, sentence, totalCount, currentIndex, onAnswer, onSkip }) {
+function WordContextPopup({ word, sentence, shopType, totalCount, currentIndex, onAnswer, onSkip }) {
   const [options, setOptions] = useState(null);
   const [optionsLoading, setOptionsLoading] = useState(true);
-  const [optionsError, setOptionsError] = useState('');
   const [selected, setSelected] = useState(null);
   const [customInput, setCustomInput] = useState('');
 
   useEffect(() => {
     let cancelled = false;
     setOptionsLoading(true);
-    setOptionsError('');
     setOptions(null);
     setSelected(null);
     setCustomInput('');
 
-    generateContextOptions(word, sentence)
+    generateContextOptions(word, sentence, shopType)
       .then((data) => { if (!cancelled) setOptions(data.options); })
-      .catch(() => { if (!cancelled) setOptionsError('선택지를 불러오지 못했어요. 직접 입력해주세요.'); })
+      .catch((e) => { console.error('generateContextOptions failed:', e); })
       .finally(() => { if (!cancelled) setOptionsLoading(false); });
 
     return () => { cancelled = true; };
-  }, [word, sentence]);
+  }, [word, sentence, shopType]);
 
   const isLast = currentIndex === totalCount - 1;
   const canProceed = selected !== null && (selected !== 'custom' || customInput.trim());
@@ -101,9 +99,6 @@ function WordContextPopup({ word, sentence, totalCount, currentIndex, onAnswer, 
             </div>
           ) : (
             <div className="flex flex-col gap-2">
-              {optionsError && (
-                <p className="text-xs text-amber-600 bg-amber-50 rounded-lg px-3 py-2 mb-1">{optionsError}</p>
-              )}
               {options?.map((opt, i) => (
                 <button
                   key={i}
@@ -534,6 +529,7 @@ export default function ReferencePanel({ onAnalysisDone }) {
         <WordContextPopup
           word={currentWord}
           sentence={currentSentence}
+          shopType={shopType}
           totalCount={contextQueue.length + contextAnswers.length}
           currentIndex={contextAnswers.length}
           onAnswer={handleWordAnswer}

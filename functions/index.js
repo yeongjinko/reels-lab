@@ -415,13 +415,15 @@ exports.refineAnalysis = onCall(
   }
 );
 
-const CONTEXT_OPTIONS_PROMPT = `너는 릴스 대본 분석 전문가야.
-아래 문장에서 특정 단어가 어떤 의미/맥락으로 사용됐는지
-가능한 해석 4가지를 생성해줘.
+const CONTEXT_OPTIONS_PROMPT = `너는 의류 쇼핑몰 릴스 대본 분석 전문가야.
+아래 문장에서 특정 단어가 어떤 의미/맥락으로 사용됐는지 가능한 해석 4가지를 생성해줘.
 
 각 선택지:
 - label: 해석 설명 (15자 이내, 간결하게)
 - effect: 이 맥락으로 해석할 때 릴스 분석에 미치는 영향 (1~2문장)
+
+여성의류 쇼핑몰이면: 감성/공감/변신욕구/군중심리 관점에서 영향 설명
+남성의류 쇼핑몰이면: 기능/가성비/코디/수치 관점에서 영향 설명
 
 반드시 JSON으로만 반환:
 {
@@ -448,16 +450,17 @@ exports.generateContextOptions = onCall(
   { secrets: [anthropicApiKey] },
   async (request) => {
     if (!request.auth) throw new HttpsError('unauthenticated', '로그인이 필요합니다.');
-    const { word, sentence } = request.data;
+    const { word, sentence, shopType } = request.data;
     if (!word || !sentence) throw new HttpsError('invalid-argument', '단어와 문장이 필요합니다.');
 
     const client = new Anthropic({ apiKey: anthropicApiKey.value() });
+    const shopLabel = SHOP_TYPE_LABEL[shopType] || '여성의류';
     try {
       const message = await client.messages.create({
         model: MODEL,
         max_tokens: 1024,
         system: CONTEXT_OPTIONS_PROMPT,
-        messages: [{ role: 'user', content: `단어: ${word}\n문장: ${sentence}` }],
+        messages: [{ role: 'user', content: `쇼핑몰 타입: ${shopLabel}\n단어: ${word}\n문장: ${sentence}` }],
       });
       const result = parseJsonFromText(message.content[0].text);
       return { success: true, data: result };
