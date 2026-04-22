@@ -1,125 +1,72 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
+import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
+import { db } from '../../firebase/config';
+import { useApp } from '../../App';
 import { generateTemplate } from '../../services/anthropic';
+import TemplateEditor from '../common/TemplateEditor';
 
-function parseTemplate(template) {
-  const parts = [];
-  const regex = /\[([^\]]+)\]/g;
-  let lastIndex = 0;
-  let match;
-  let idx = 0;
+const CATEGORIES = [
+  { id: '의류', icon: '👗' },
+  { id: '뷰티', icon: '💄' },
+  { id: '식품', icon: '🍱' },
+  { id: '생활용품', icon: '🏠' },
+  { id: '기타', icon: '📦' },
+];
 
-  while ((match = regex.exec(template)) !== null) {
-    if (match.index > lastIndex) {
-      parts.push({ type: 'text', content: template.slice(lastIndex, match.index) });
-    }
-    parts.push({ type: 'placeholder', hint: match[1], idx: idx++ });
-    lastIndex = match.index + match[0].length;
-  }
-
-  if (lastIndex < template.length) {
-    parts.push({ type: 'text', content: template.slice(lastIndex) });
-  }
-
-  return parts;
-}
-
-function TemplateEditor({ template }) {
-  const [values, setValues] = useState({});
-  const [activeIdx, setActiveIdx] = useState(null);
-  const [copied, setCopied] = useState(false);
-
-  const parts = useMemo(() => parseTemplate(template), [template]);
-  const placeholders = parts.filter((p) => p.type === 'placeholder');
-  const filledCount = placeholders.filter((p) => values[p.idx]).length;
-
-  const completedScript = parts
-    .map((p) => (p.type === 'text' ? p.content : values[p.idx] || `[${p.hint}]`))
-    .join('');
-
-  function handleCopy() {
-    navigator.clipboard.writeText(completedScript);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1500);
-  }
-
-  return (
-    <div>
-      <div className="bg-gray-50 border border-gray-200 rounded-xl p-4 text-sm leading-8 whitespace-pre-wrap">
-        {parts.map((part, i) => {
-          if (part.type === 'text') {
-            return <React.Fragment key={i}>{part.content}</React.Fragment>;
-          }
-
-          const value = values[part.idx] || '';
-          const isActive = activeIdx === part.idx;
-
-          if (isActive) {
-            return (
-              <input
-                key={i}
-                autoFocus
-                value={value}
-                onChange={(e) => setValues((v) => ({ ...v, [part.idx]: e.target.value }))}
-                onBlur={() => setActiveIdx(null)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') { e.preventDefault(); setActiveIdx(null); }
-                }}
-                placeholder={part.hint}
-                className="bg-indigo-50 border-0 border-b-2 border-indigo-500 outline-none px-1 rounded-t-sm text-sm text-gray-900 placeholder-gray-400 align-baseline"
-                style={{ width: `${Math.max(72, Math.max(value.length, part.hint.length) * 9)}px` }}
-              />
-            );
-          }
-
-          return (
-            <span
-              key={i}
-              onClick={() => setActiveIdx(part.idx)}
-              className={`cursor-pointer rounded px-1.5 transition-colors align-baseline ${
-                value
-                  ? 'bg-indigo-100 text-indigo-800 font-medium hover:bg-indigo-200'
-                  : 'bg-yellow-100 text-yellow-700 border-b border-yellow-400 hover:bg-yellow-200'
-              }`}
-            >
-              {value || part.hint}
-            </span>
-          );
-        })}
-      </div>
-
-      <div className="mt-3 flex items-center justify-between">
-        <p className="text-xs text-gray-400">
-          {placeholders.length > 0 ? `${filledCount}/${placeholders.length} 채움` : '빈칸 없음'}
-        </p>
-        <button
-          onClick={handleCopy}
-          className="flex items-center gap-1.5 text-xs font-semibold bg-indigo-600 hover:bg-indigo-700 text-white px-3.5 py-2 rounded-lg transition-colors"
-        >
-          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
-          </svg>
-          {copied ? '복사됨 ✓' : '완성 대본 복사'}
-        </button>
-      </div>
-    </div>
-  );
-}
-
-export default function ScriptPanel({ analysis, referenceText }) {
-  const [templateData, setTemplateData] = useState(null);
+export default function ScriptPanel({ analysis, referenceText, initialTemplateData }) {
+  const { user } = useApp();
+  const [templateData, setTemplateData] = useState(initialTemplateData || null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [categoryPopup, setCategoryPopup] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const initialRef = useRef(initialTemplateData);
 
   useEffect(() => {
     if (!referenceText) return;
+    if (initialRef.current) {
+      setTemplateData(initialRef.current);
+      initialRef.current = null;
+      return;
+    }
     setLoading(true);
     setError('');
     setTemplateData(null);
+    setSaved(false);
     generateTemplate(referenceText)
       .then((data) => setTemplateData(data))
       .catch((e) => setError(e.message || '템플릿 생성 중 오류가 발생했습니다.'))
       .finally(() => setLoading(false));
   }, [referenceText]);
+
+  async function handleSave(category) {
+    if (!user || !templateData || !referenceText) return;
+    setSaving(true);
+    setCategoryPopup(false);
+    try {
+      await addDoc(collection(db, 'library'), {
+        userId: user.uid,
+        createdAt: serverTimestamp(),
+        script: referenceText,
+        hookType: templateData.hookType || '',
+        isNewType: templateData.isNewType || false,
+        empathyPoint: templateData.empathyPoint || '',
+        empathyTags: templateData.empathyTags || [],
+        category,
+        preview: referenceText.slice(0, 50),
+        hookFormula: analysis?.hookFormula || '',
+        hookFormulaDesc: analysis?.hookFormulaDesc || '',
+        sentences: analysis?.sentences || [],
+        template: templateData.template || '',
+      });
+      setSaved(true);
+    } catch (e) {
+      console.error('library save failed:', e);
+    } finally {
+      setSaving(false);
+    }
+  }
 
   return (
     <div className="flex flex-col h-full">
@@ -159,15 +106,22 @@ export default function ScriptPanel({ analysis, referenceText }) {
                 <span className="text-xs font-bold text-orange-700 uppercase tracking-wider">이 영상의 공감 포인트</span>
                 {templateData.hookType && (
                   <span className={`ml-auto text-[11px] font-semibold px-2 py-0.5 rounded-full flex-shrink-0 ${
-                    templateData.isNewType
-                      ? 'bg-amber-100 text-amber-700'
-                      : 'bg-orange-100 text-orange-600'
+                    templateData.isNewType ? 'bg-amber-100 text-amber-700' : 'bg-orange-100 text-orange-600'
                   }`}>
-                    {templateData.isNewType ? '✦ 새 유형 · ' : ''}{templateData.hookType}
+                    {templateData.isNewType ? '✦ ' : ''}{templateData.hookType}
                   </span>
                 )}
               </div>
-              <p className="text-sm text-orange-900 leading-relaxed">{templateData.empathyPoint}</p>
+              <p className="text-sm text-orange-900 leading-relaxed mb-3">{templateData.empathyPoint}</p>
+              {templateData.empathyTags?.length > 0 && (
+                <div className="flex flex-wrap gap-1.5">
+                  {templateData.empathyTags.map((tag, i) => (
+                    <span key={i} className="text-[11px] bg-orange-100 text-orange-700 px-2 py-0.5 rounded-full font-medium">
+                      #{tag}
+                    </span>
+                  ))}
+                </div>
+              )}
             </div>
 
             {/* 스크립트 템플릿 */}
@@ -178,15 +132,77 @@ export default function ScriptPanel({ analysis, referenceText }) {
                 </svg>
                 <span className="text-xs font-bold text-indigo-700 uppercase tracking-wider">내 스크립트 템플릿</span>
               </div>
-              <p className="text-xs text-gray-400 mb-3">
-                노란 빈칸을 클릭해서 내 상품에 맞게 채워보세요
-              </p>
+              <p className="text-xs text-gray-400 mb-3">노란 빈칸을 클릭해서 내 상품에 맞게 채워보세요</p>
               <TemplateEditor key={templateData.template} template={templateData.template} />
+            </div>
+
+            {/* 라이브러리 저장 */}
+            <div className="border-t border-gray-100 pt-4">
+              <button
+                onClick={() => setCategoryPopup(true)}
+                disabled={saving || saved}
+                className={`w-full flex items-center justify-center gap-2 font-semibold py-2.5 rounded-xl transition-colors text-sm ${
+                  saved
+                    ? 'bg-emerald-50 text-emerald-600 border border-emerald-200 cursor-default'
+                    : saving
+                    ? 'bg-gray-100 text-gray-400 cursor-wait'
+                    : 'bg-white border border-gray-200 text-gray-700 hover:border-indigo-300 hover:text-indigo-600 hover:bg-indigo-50'
+                }`}
+              >
+                {saved ? (
+                  <>
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                    </svg>
+                    라이브러리에 저장됨
+                  </>
+                ) : saving ? (
+                  <>
+                    <div className="w-4 h-4 border-2 border-gray-400 border-t-transparent rounded-full animate-spin" />
+                    저장 중...
+                  </>
+                ) : (
+                  <>
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
+                    </svg>
+                    레퍼런스 라이브러리에 저장
+                  </>
+                )}
+              </button>
             </div>
 
           </div>
         ) : null}
       </div>
+
+      {/* 카테고리 선택 팝업 */}
+      {categoryPopup && (
+        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm p-6">
+            <h3 className="text-base font-bold text-gray-900 mb-1">카테고리 선택</h3>
+            <p className="text-xs text-gray-500 mb-4">이 레퍼런스의 상품 카테고리를 선택해주세요</p>
+            <div className="grid grid-cols-3 gap-2 mb-4">
+              {CATEGORIES.map((cat) => (
+                <button
+                  key={cat.id}
+                  onClick={() => handleSave(cat.id)}
+                  className="flex flex-col items-center gap-1.5 p-3 rounded-xl border-2 border-gray-200 hover:border-indigo-400 hover:bg-indigo-50 transition-all"
+                >
+                  <span className="text-xl">{cat.icon}</span>
+                  <span className="text-xs font-semibold text-gray-700">{cat.id}</span>
+                </button>
+              ))}
+            </div>
+            <button
+              onClick={() => setCategoryPopup(false)}
+              className="w-full text-sm text-gray-400 hover:text-gray-600 py-2 transition-colors"
+            >
+              취소
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

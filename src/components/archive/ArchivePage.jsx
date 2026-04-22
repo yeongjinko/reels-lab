@@ -99,7 +99,7 @@ export default function ArchivePage() {
   const [deleting, setDeleting] = useState(null);
 
   useEffect(() => {
-    if (!user) return;
+    if (!user) { setLoading(false); return; }
     const q = query(
       collection(db, 'scripts'),
       where('userId', '==', user.uid),
