@@ -7,6 +7,167 @@ import { useNavigate } from 'react-router-dom';
 import { db } from '../../firebase/config';
 import { useApp } from '../../App';
 
+const TAG_STYLES = {
+  후킹: 'bg-orange-100 text-orange-700',
+  본문: 'bg-green-100 text-green-700',
+  심리: 'bg-purple-100 text-purple-700',
+  CTA: 'bg-red-100 text-red-700',
+};
+
+function getTitle(script) {
+  const lines = (script || '').split('\n').filter(l => l.trim());
+  return lines[0]?.slice(0, 40) || '제목 없음';
+}
+
+function getBody(script) {
+  const lines = (script || '').split('\n').filter(l => l.trim());
+  return lines.slice(1).join('\n') || lines[0] || '';
+}
+
+/* ── 상세 모달 ── */
+function DetailModal({ item, onClose, onAnalyze }) {
+  return (
+    <div
+      className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+      onClick={onClose}
+    >
+      <div
+        className="bg-white rounded-2xl shadow-xl w-full max-w-xl max-h-[88vh] flex flex-col"
+        onClick={e => e.stopPropagation()}
+      >
+        {/* 헤더 */}
+        <div className="px-6 pt-5 pb-4 border-b border-gray-100 flex-shrink-0">
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex-1 min-w-0">
+              <div className="flex flex-wrap items-center gap-2 mb-1.5">
+                <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full flex-shrink-0 ${item.analyzed ? 'bg-emerald-100 text-emerald-700' : 'bg-gray-100 text-gray-500'}`}>
+                  {item.analyzed ? '분석완료' : '미분석'}
+                </span>
+                {item.analyzed && item.hookType && (
+                  <span className="text-[11px] bg-indigo-100 text-indigo-600 font-semibold px-2 py-0.5 rounded-full">
+                    {item.hookType}
+                  </span>
+                )}
+              </div>
+              <h3 className="text-base font-bold text-gray-900 leading-snug">{getTitle(item.script)}</h3>
+              {item.link && (
+                <a
+                  href={item.link}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center gap-1 text-xs text-indigo-500 hover:text-indigo-700 mt-1 transition-colors"
+                >
+                  <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+                  </svg>
+                  원본 링크
+                </a>
+              )}
+            </div>
+            <button onClick={onClose} className="text-gray-400 hover:text-gray-600 flex-shrink-0 transition-colors">
+              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+        </div>
+
+        {/* 콘텐츠 */}
+        <div className="flex-1 overflow-y-auto px-6 py-5 flex flex-col gap-5">
+          {/* 대본 전문 */}
+          <div>
+            <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">대본 전문</p>
+            <div className="bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm text-gray-700 leading-relaxed whitespace-pre-wrap">
+              {item.script}
+            </div>
+          </div>
+
+          {/* 분석 결과 */}
+          {item.analyzed && (
+            <>
+              {/* 공감 포인트 */}
+              {item.empathyPoint && (
+                <div className="bg-orange-50 border border-orange-200 rounded-xl p-4">
+                  <div className="flex items-center gap-2 mb-2">
+                    <svg className="w-4 h-4 text-orange-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" />
+                    </svg>
+                    <span className="text-xs font-bold text-orange-700 uppercase tracking-wider">공감 포인트</span>
+                  </div>
+                  <p className="text-sm text-orange-900 leading-relaxed">{item.empathyPoint}</p>
+                  {item.empathyTags?.length > 0 && (
+                    <div className="flex flex-wrap gap-1.5 mt-2.5">
+                      {item.empathyTags.map((tag, i) => (
+                        <span key={i} className="text-[11px] bg-orange-100 text-orange-700 px-2 py-0.5 rounded-full font-medium">#{tag}</span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* 후킹 공식 */}
+              {item.analysis?.hookFormula && (
+                <div className="bg-indigo-50 border border-indigo-200 rounded-xl p-4">
+                  <div className="flex items-center gap-2 mb-2">
+                    <svg className="w-4 h-4 text-indigo-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+                    </svg>
+                    <span className="text-xs font-bold text-indigo-700 uppercase tracking-wider">후킹 공식</span>
+                  </div>
+                  <p className="text-indigo-900 font-bold text-sm mb-1">{item.analysis.hookFormula}</p>
+                  {item.analysis.hookFormulaDesc && (
+                    <p className="text-indigo-700 text-xs leading-relaxed">{item.analysis.hookFormulaDesc}</p>
+                  )}
+                </div>
+              )}
+
+              {/* 문장별 분석 */}
+              {item.analysis?.sentences?.length > 0 && (
+                <div>
+                  <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2.5">문장별 분석</p>
+                  <div className="flex flex-col gap-2">
+                    {item.analysis.sentences.map((s, i) => (
+                      <div key={i} className="bg-white border border-gray-100 rounded-xl p-3 shadow-sm">
+                        <div className="flex items-start gap-2 mb-1.5">
+                          <span className={`text-[11px] font-bold px-2 py-0.5 rounded-full flex-shrink-0 ${TAG_STYLES[s.tag] || 'bg-gray-100 text-gray-600'}`}>
+                            {s.tag}
+                          </span>
+                          <p className="text-sm text-gray-800 font-medium leading-snug">{s.text}</p>
+                        </div>
+                        <p className="text-xs text-gray-500 leading-relaxed pl-0.5">{s.effect}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+
+        {/* 하단 버튼 */}
+        <div className="px-6 py-4 border-t border-gray-100 flex-shrink-0 flex gap-2">
+          <button
+            onClick={() => onAnalyze(item)}
+            className="flex-1 flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-2.5 rounded-xl transition-colors text-sm"
+          >
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+            </svg>
+            {item.analyzed ? '이 레퍼런스로 스크립트 기획하기' : '분석하러 가기'}
+          </button>
+          <button
+            onClick={onClose}
+            className="px-5 py-2.5 text-sm text-gray-500 hover:text-gray-700 border border-gray-200 rounded-xl hover:bg-gray-50 transition-colors"
+          >
+            닫기
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ── 폴더 사이드바 ── */
 function FolderSidebar({ folders, items, selectedFolderId, onSelect, onCreateFolder, onRenameFolder, onDeleteFolder }) {
   const [showInput, setShowInput] = useState(false);
   const [newName, setNewName] = useState('');
@@ -39,12 +200,10 @@ function FolderSidebar({ folders, items, selectedFolderId, onSelect, onCreateFol
   return (
     <div className="w-48 flex-shrink-0 border-r border-gray-200 bg-gray-50 flex flex-col overflow-y-auto">
       <div className="p-2 flex flex-col gap-0.5">
-        {/* 전체보기 */}
         <button onClick={() => onSelect(null)} className={`${btnBase} ${selectedFolderId === null ? active : inactive}`}>
           <span>전체보기</span>
           <span className="text-xs bg-gray-200 text-gray-600 px-1.5 py-0.5 rounded-full">{countInFolder(null)}</span>
         </button>
-        {/* 미분류 */}
         <button onClick={() => onSelect('uncat')} className={`${btnBase} ${selectedFolderId === 'uncat' ? active : inactive}`}>
           <span>미분류</span>
           <span className="text-xs bg-gray-200 text-gray-600 px-1.5 py-0.5 rounded-full">{countInFolder('uncat')}</span>
@@ -52,7 +211,6 @@ function FolderSidebar({ folders, items, selectedFolderId, onSelect, onCreateFol
 
         {folders.length > 0 && <div className="border-t border-gray-200 my-1" />}
 
-        {/* 사용자 폴더 */}
         {folders.map(folder => (
           <div key={folder.id} className="group relative">
             {editingId === folder.id ? (
@@ -75,9 +233,7 @@ function FolderSidebar({ folders, items, selectedFolderId, onSelect, onCreateFol
               >
                 <span className="truncate flex-1 text-left">{folder.name}</span>
                 <div className="flex items-center gap-1 flex-shrink-0">
-                  <span className="text-xs bg-gray-200 text-gray-600 px-1.5 py-0.5 rounded-full">
-                    {countInFolder(folder.id)}
-                  </span>
+                  <span className="text-xs bg-gray-200 text-gray-600 px-1.5 py-0.5 rounded-full">{countInFolder(folder.id)}</span>
                   <button
                     onClick={e => { e.stopPropagation(); onDeleteFolder(folder.id); }}
                     className="opacity-0 group-hover:opacity-100 text-gray-400 hover:text-red-400 transition-all w-5 h-5 flex items-center justify-center rounded"
@@ -92,7 +248,6 @@ function FolderSidebar({ folders, items, selectedFolderId, onSelect, onCreateFol
           </div>
         ))}
 
-        {/* 새 폴더 */}
         <div className="mt-1">
           {showInput ? (
             <input
@@ -124,6 +279,7 @@ function FolderSidebar({ folders, items, selectedFolderId, onSelect, onCreateFol
   );
 }
 
+/* ── 메인 페이지 ── */
 export default function LibraryPage() {
   const { user } = useApp();
   const navigate = useNavigate();
@@ -132,6 +288,7 @@ export default function LibraryPage() {
   const [itemsLoading, setItemsLoading] = useState(false);
   const [folders, setFolders] = useState([]);
   const [selectedFolderId, setSelectedFolderId] = useState(null);
+  const [detailItem, setDetailItem] = useState(null);
 
   const [showForm, setShowForm] = useState(false);
   const [formLink, setFormLink] = useState('');
@@ -140,7 +297,6 @@ export default function LibraryPage() {
   const [deleting, setDeleting] = useState(null);
   const [movingItemId, setMovingItemId] = useState(null);
 
-  // Load items
   useEffect(() => {
     if (!user) { setItemsLoading(false); return; }
     console.log('[LibraryPage] loading items for uid:', user.uid);
@@ -158,7 +314,6 @@ export default function LibraryPage() {
     );
   }, [user]);
 
-  // Load folders
   useEffect(() => {
     if (!user) return;
     const q = query(collection(db, 'referenceFolders'), where('userId', '==', user.uid));
@@ -180,11 +335,7 @@ export default function LibraryPage() {
 
   async function handleCreateFolder(name) {
     if (!user) return;
-    await addDoc(collection(db, 'referenceFolders'), {
-      userId: user.uid,
-      name,
-      createdAt: serverTimestamp(),
-    });
+    await addDoc(collection(db, 'referenceFolders'), { userId: user.uid, name, createdAt: serverTimestamp() });
   }
 
   async function handleRenameFolder(id, name) {
@@ -242,6 +393,7 @@ export default function LibraryPage() {
   }
 
   function handleAnalyze(item) {
+    setDetailItem(null);
     navigate('/', {
       state: {
         libraryItem: {
@@ -255,7 +407,7 @@ export default function LibraryPage() {
 
   return (
     <div className="h-full flex flex-col">
-      {/* Header */}
+      {/* 헤더 */}
       <div className="px-6 py-4 border-b border-gray-200 bg-white flex-shrink-0 flex items-center justify-between">
         <div>
           <h1 className="text-lg font-bold text-gray-900">레퍼런스 라이브러리</h1>
@@ -273,7 +425,6 @@ export default function LibraryPage() {
       </div>
 
       <div className="flex flex-1 overflow-hidden">
-        {/* Folder Sidebar */}
         <FolderSidebar
           folders={folders}
           items={items}
@@ -284,8 +435,8 @@ export default function LibraryPage() {
           onDeleteFolder={handleDeleteFolder}
         />
 
-        {/* Card Grid */}
-        <div className="flex-1 overflow-y-auto p-6">
+        {/* 카드 그리드 */}
+        <div className="flex-1 overflow-y-auto p-5">
           {itemsLoading ? (
             <div className="flex items-center justify-center h-48 gap-2">
               <div className="w-5 h-5 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
@@ -306,100 +457,86 @@ export default function LibraryPage() {
               </p>
             </div>
           ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            /* 9:16 비율 카드 그리드 */
+            <div className="grid grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
               {filteredItems.map(item => (
-                <div key={item.id} className="bg-white border border-gray-200 rounded-2xl p-4 flex flex-col gap-3 hover:shadow-md transition-shadow group relative">
-
-                  {/* 상태 + 액션 */}
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full ${item.analyzed ? 'bg-emerald-100 text-emerald-700' : 'bg-gray-100 text-gray-500'}`}>
+                <div
+                  key={item.id}
+                  onClick={() => setDetailItem(item)}
+                  className="aspect-[9/16] bg-white border border-gray-200 rounded-2xl flex flex-col cursor-pointer hover:shadow-lg hover:border-indigo-200 transition-all group overflow-hidden"
+                >
+                  {/* 상단: 상태 + 액션 */}
+                  <div className="flex items-center justify-between px-3 pt-3 pb-2 flex-shrink-0">
+                    <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${item.analyzed ? 'bg-emerald-100 text-emerald-700' : 'bg-gray-100 text-gray-400'}`}>
                       {item.analyzed ? '분석완료' : '미분석'}
                     </span>
-                    {item.analyzed && item.hookType && (
-                      <span className="text-[11px] bg-indigo-100 text-indigo-600 font-semibold px-2 py-0.5 rounded-full truncate max-w-[100px]">
-                        {item.hookType}
-                      </span>
-                    )}
-                    <div className="ml-auto flex items-center gap-1.5 flex-shrink-0">
-                      {item.link && (
-                        <a href={item.link} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()} className="text-gray-400 hover:text-indigo-500 transition-colors" title="원본 링크">
-                          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
-                          </svg>
-                        </a>
-                      )}
+                    <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                       {/* 폴더 이동 */}
                       <div className="relative">
                         <button
                           onClick={e => { e.stopPropagation(); setMovingItemId(movingItemId === item.id ? null : item.id); }}
-                          className="text-gray-400 hover:text-indigo-500 transition-colors opacity-0 group-hover:opacity-100"
-                          title="폴더 이동"
+                          className="w-6 h-6 flex items-center justify-center text-gray-400 hover:text-indigo-500 rounded-md hover:bg-indigo-50 transition-colors"
                         >
                           <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V7z" />
                           </svg>
                         </button>
                         {movingItemId === item.id && (
-                          <div className="absolute right-0 top-6 z-20 bg-white border border-gray-200 rounded-xl shadow-lg py-1 min-w-[140px]">
-                            <button
-                              onClick={() => handleMoveItem(item.id, null)}
-                              className="w-full text-left px-3 py-2 text-xs hover:bg-gray-50 text-gray-600"
-                            >
-                              미분류
-                            </button>
+                          <div className="absolute right-0 top-7 z-20 bg-white border border-gray-200 rounded-xl shadow-lg py-1 min-w-[130px]">
+                            <button onClick={e => { e.stopPropagation(); handleMoveItem(item.id, null); }} className="w-full text-left px-3 py-1.5 text-xs hover:bg-gray-50 text-gray-600">미분류</button>
                             {folders.map(f => (
-                              <button
-                                key={f.id}
-                                onClick={() => handleMoveItem(item.id, f.id)}
-                                className={`w-full text-left px-3 py-2 text-xs hover:bg-gray-50 ${item.folderId === f.id ? 'text-indigo-600 font-semibold' : 'text-gray-600'}`}
-                              >
-                                {f.name}
-                              </button>
+                              <button key={f.id} onClick={e => { e.stopPropagation(); handleMoveItem(item.id, f.id); }} className={`w-full text-left px-3 py-1.5 text-xs hover:bg-gray-50 ${item.folderId === f.id ? 'text-indigo-600 font-semibold' : 'text-gray-600'}`}>{f.name}</button>
                             ))}
                           </div>
                         )}
                       </div>
+                      {/* 삭제 */}
                       <button
                         onClick={e => handleDelete(e, item.id)}
                         disabled={deleting === item.id}
-                        className="text-gray-300 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-all"
+                        className="w-6 h-6 flex items-center justify-center text-gray-400 hover:text-red-400 rounded-md hover:bg-red-50 transition-colors"
                       >
                         {deleting === item.id
-                          ? <div className="w-3.5 h-3.5 border-2 border-gray-400 border-t-transparent rounded-full animate-spin" />
+                          ? <div className="w-3 h-3 border-2 border-gray-400 border-t-transparent rounded-full animate-spin" />
                           : <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
                         }
                       </button>
                     </div>
                   </div>
 
-                  {/* 미리보기 */}
-                  <p className="text-sm text-gray-700 leading-relaxed line-clamp-3 flex-1">
-                    {item.preview || item.script?.slice(0, 80)}
-                  </p>
+                  {/* 중간: 제목 + 대본 미리보기 */}
+                  <div className="flex-1 px-3 overflow-hidden flex flex-col gap-1.5 min-h-0">
+                    <p className="text-xs font-bold text-gray-800 leading-snug line-clamp-2">
+                      {getTitle(item.script)}
+                    </p>
+                    <p className="text-[11px] text-gray-500 leading-relaxed line-clamp-[8] whitespace-pre-wrap">
+                      {getBody(item.script)}
+                    </p>
+                  </div>
 
-                  {/* 태그 */}
-                  {item.analyzed && item.empathyTags?.length > 0 && (
-                    <div className="flex flex-wrap gap-1">
-                      {item.empathyTags.slice(0, 3).map((tag, i) => (
-                        <span key={i} className="text-[10px] bg-orange-50 text-orange-600 px-1.5 py-0.5 rounded-full">#{tag}</span>
-                      ))}
-                    </div>
-                  )}
-
-                  {/* 분석 버튼 */}
-                  <button
-                    onClick={() => handleAnalyze(item)}
-                    className={`w-full flex items-center justify-center gap-1.5 text-xs font-semibold py-2 rounded-xl transition-colors ${
-                      item.analyzed
-                        ? 'bg-gray-50 text-gray-500 hover:bg-indigo-50 hover:text-indigo-600 border border-gray-200 hover:border-indigo-200'
-                        : 'bg-indigo-600 hover:bg-indigo-700 text-white'
-                    }`}
-                  >
-                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
-                    </svg>
-                    {item.analyzed ? '스크립트 기획하기' : '분석하기'}
-                  </button>
+                  {/* 하단: 후킹 유형 + 공감 태그 */}
+                  <div className="px-3 pb-3 pt-2 flex-shrink-0 flex flex-col gap-1.5">
+                    {item.analyzed && item.hookType && (
+                      <span className="text-[10px] bg-indigo-100 text-indigo-600 font-semibold px-2 py-0.5 rounded-full self-start truncate max-w-full">
+                        {item.hookType}
+                      </span>
+                    )}
+                    {item.empathyTags?.length > 0 && (
+                      <div className="flex flex-wrap gap-1">
+                        {item.empathyTags.slice(0, 3).map((tag, i) => (
+                          <span key={i} className="text-[9px] bg-orange-50 text-orange-500 px-1.5 py-0.5 rounded-full">#{tag}</span>
+                        ))}
+                      </div>
+                    )}
+                    {item.link && (
+                      <div className="flex items-center gap-1 text-[10px] text-gray-400">
+                        <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+                        </svg>
+                        링크 있음
+                      </div>
+                    )}
+                  </div>
                 </div>
               ))}
             </div>
@@ -407,9 +544,16 @@ export default function LibraryPage() {
         </div>
       </div>
 
-      {/* 폴더 이동 드롭다운 백드롭 */}
-      {movingItemId && (
-        <div className="fixed inset-0 z-10" onClick={() => setMovingItemId(null)} />
+      {/* 폴더 이동 백드롭 */}
+      {movingItemId && <div className="fixed inset-0 z-10" onClick={() => setMovingItemId(null)} />}
+
+      {/* 상세 모달 */}
+      {detailItem && (
+        <DetailModal
+          item={detailItem}
+          onClose={() => setDetailItem(null)}
+          onAnalyze={handleAnalyze}
+        />
       )}
 
       {/* 새 레퍼런스 추가 모달 */}
