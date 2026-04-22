@@ -463,20 +463,36 @@ export default function LibraryPage() {
               </p>
             </div>
           ) : (
-            /* 9:16 비율 카드 그리드 */
-            <div className="grid grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
+            <div className="grid grid-cols-3 lg:grid-cols-4 gap-3">
               {filteredItems.map(item => (
                 <div
                   key={item.id}
                   onClick={() => setDetailItem(item)}
-                  className="aspect-[9/16] bg-white border border-gray-200 rounded-2xl flex flex-col cursor-pointer hover:shadow-lg hover:border-indigo-200 transition-all group overflow-hidden"
+                  className="bg-white border border-gray-200 rounded-xl p-3 flex flex-col gap-2 cursor-pointer hover:shadow-md hover:border-indigo-200 transition-all group"
                 >
-                  {/* 상단: 상태 + 액션 */}
-                  <div className="flex items-center justify-between px-3 pt-3 pb-2 flex-shrink-0">
-                    <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${item.analyzed ? 'bg-emerald-100 text-emerald-700' : 'bg-gray-100 text-gray-400'}`}>
-                      {item.analyzed ? '분석완료' : '미분석'}
-                    </span>
-                    <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                  {/* 제목 */}
+                  <p className="text-xs font-bold text-gray-800 truncate">
+                    {item.title || getTitle(item.script)}
+                  </p>
+
+                  {/* 80자 미리보기 */}
+                  <p className="text-[11px] text-gray-500 leading-relaxed">
+                    {(item.script || '').slice(0, 80)}{(item.script?.length ?? 0) > 80 ? '…' : ''}
+                  </p>
+
+                  {/* 뱃지 + 액션 */}
+                  <div className="flex items-center justify-between gap-1 mt-auto">
+                    <div className="flex items-center gap-1 flex-wrap min-w-0">
+                      <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full flex-shrink-0 ${item.analyzed ? 'bg-emerald-100 text-emerald-700' : 'bg-gray-100 text-gray-400'}`}>
+                        {item.analyzed ? '분석완료' : '미분석'}
+                      </span>
+                      {item.analyzed && item.hookType && (
+                        <span className="text-[10px] bg-indigo-100 text-indigo-600 font-semibold px-1.5 py-0.5 rounded-full truncate max-w-[80px]">
+                          {item.hookType}
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
                       {/* 폴더 이동 */}
                       <div className="relative">
                         <button
@@ -508,47 +524,6 @@ export default function LibraryPage() {
                         }
                       </button>
                     </div>
-                  </div>
-
-                  {/* 중간: 제목 + 대본 미리보기 */}
-                  <div className="flex-1 px-3 overflow-hidden flex flex-col gap-1.5 min-h-0">
-                    <div className="flex items-start gap-1">
-                      <p className="text-xs font-bold text-gray-800 leading-snug line-clamp-2 flex-1">
-                        {item.title || getTitle(item.script)}
-                      </p>
-                      {item.link && (
-                        <svg className="w-3 h-3 text-gray-300 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
-                        </svg>
-                      )}
-                    </div>
-                    <p className="text-[11px] text-gray-500 leading-relaxed line-clamp-6 whitespace-pre-wrap">
-                      {item.script}
-                    </p>
-                  </div>
-
-                  {/* 하단: 후킹 유형 + 공감 태그 */}
-                  <div className="px-3 pb-3 pt-2 flex-shrink-0 flex flex-col gap-1.5">
-                    {item.analyzed && item.hookType && (
-                      <span className="text-[10px] bg-indigo-100 text-indigo-600 font-semibold px-2 py-0.5 rounded-full self-start truncate max-w-full">
-                        {item.hookType}
-                      </span>
-                    )}
-                    {item.empathyTags?.length > 0 && (
-                      <div className="flex flex-wrap gap-1">
-                        {item.empathyTags.slice(0, 3).map((tag, i) => (
-                          <span key={i} className="text-[9px] bg-orange-50 text-orange-500 px-1.5 py-0.5 rounded-full">#{tag}</span>
-                        ))}
-                      </div>
-                    )}
-                    {item.link && (
-                      <div className="flex items-center gap-1 text-[10px] text-gray-400">
-                        <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
-                        </svg>
-                        링크 있음
-                      </div>
-                    )}
                   </div>
                 </div>
               ))}
