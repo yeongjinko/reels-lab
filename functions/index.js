@@ -2,8 +2,11 @@ const { onCall, HttpsError } = require('firebase-functions/v2/https');
 const { defineSecret } = require('firebase-functions/params');
 const { setGlobalOptions } = require('firebase-functions/v2');
 const Anthropic = require('@anthropic-ai/sdk');
+const admin = require('firebase-admin');
 
 setGlobalOptions({ region: 'asia-northeast3' });
+
+admin.initializeApp();
 
 const anthropicApiKey = defineSecret('ANTHROPIC_API_KEY');
 
@@ -458,6 +461,112 @@ exports.refineAnalysis = onCall(
       console.error('refineAnalysis error:', e);
       if (e instanceof HttpsError) throw e;
       throw new HttpsError('internal', '전체 분석 수정 중 오류가 발생했습니다.');
+    }
+  }
+);
+
+const GENERATE_TEMPLATE_PROMPT = `아래 릴스 대본을 분석해서 세 가지를 추출해줘.
+
+분석 순서:
+
+1단계: 후킹 유형 파악
+아래 22개 유형 중 이 대본의 후킹이 어떤 유형인지 먼저 파악해.
+22개 유형에 해당하지 않으면 새로운 유형명을 직접 만들고 isNewType: true 표시.
+반드시 전체 대본을 처음부터 끝까지 읽고 앞 문장만 보고 결론 내지 말 것.
+
+유형1: 상황제시형 - 타겟이 찾는 상황/분위기로 후킹
+유형2: 결과제시형 - A만 해도 B되는 C 구조
+유형3: 군중심리형 - 시장 반응을 먼저 보여줌
+유형4: 브랜드반전형 - 저는 A 못 입어요 사실 안입어요 → 예측오류 발생, 왜 안입지? 궁금증 유발, 전체 맥락 보면 가성비 대안 제시 구조
+유형5: 인지부조화형 - A보다 B한 C? 진짜? → 상식을 뒤집는 의문형
+유형6: 공감형 - 이거 나만 그래요? 타겟 공감대 형성
+유형7: before/after형 - 착용 전후 비교
+유형8: 숫자형 - 딱 N가지만 기억하세요
+유형9: 금지형 - 절대 이렇게 하지 마세요
+유형10: 질문형 - 아직도 A 하세요?
+유형11: 고백형 - 사실 저 A 했어요 근데 B
+유형12: 비교형 - A vs B 뭐가 나을까요?
+유형13: 전문가반전형 - A인 내가 B를 안하는 이유
+유형14: 손실경고형 - A 이렇게 하면 B 폭탄 맞습니다
+유형15: 쉬운행동+큰결과형 - A해도 B는 기본입니다
+유형16: 비밀공개형 - A가 알리지 말라던 B 공개합니다
+유형17: 스토리증명형 - A에서 B해 C만에 D한 E
+유형18: 버리기형 - 이럴거면 그냥 버리세요
+유형19: 절약보장형 - A 이렇게만 따라하세요 B 아낍니다
+유형20: 상위%공개형 - A로 B하지 마세요 상위 0.1%의 활용법
+유형21: 의외의인물성과형 - A에 B만 달고 C하는 D
+유형22: 발견공유형 - 아는 사람만 골라간다는 A하는 초간단 방법
+
+2단계: 공감 포인트 추출
+파악한 후킹 유형이 시청자에게 주는 심리적 효과를 분석해.
+반드시 전체 대본 흐름을 처음부터 끝까지 읽고 판단해.
+앞 문장만 보고 결론 내지 말고 반드시 전체 맥락으로 판단해.
+
+예시 (유형4 브랜드반전형):
+앞부분만 보면 '비싸서 못 산다'처럼 보이지만
+전체를 보면 '선망하는 브랜드인데 안 입는다는 예측오류로 호기심 유발
+→ 왜 안 입지? 라는 궁금증이 끝까지 보게 만들고
+→ 알고보니 더 좋은 가성비 대안이 있었다는 구조'
+
+3단계: 스크립트 템플릿 생성
+대본의 구조와 흐름을 유지하면서
+핵심 키워드들을 [대체할 내용 힌트] 형태의 빈칸으로 변환.
+빈칸은 사용자가 자신의 상품/브랜드로 채워넣을 수 있게
+힌트를 명확하고 쉽게 써줘.
+
+반드시 JSON만 반환:
+{
+  "hookType": "파악된 후킹 유형명",
+  "isNewType": false,
+  "empathyPoint": "후킹 유형 기반으로 분석한 공감 포인트 (2~3줄)",
+  "template": "빈칸이 포함된 템플릿 대본 (줄바꿈 포함)"
+}`;
+
+exports.generateTemplate = onCall(
+  { secrets: [anthropicApiKey] },
+  async (request) => {
+    if (!request.auth) throw new HttpsError('unauthenticated', '로그인이 필요합니다.');
+
+    const { script } = request.data;
+    if (!script || typeof script !== 'string' || script.trim().length === 0) {
+      throw new HttpsError('invalid-argument', '대본을 입력해주세요.');
+    }
+    if (script.trim().length > 5000) {
+      throw new HttpsError('invalid-argument', '대본은 5000자 이하로 입력해주세요.');
+    }
+
+    const client = new Anthropic({ apiKey: anthropicApiKey.value() });
+    const db = admin.firestore();
+
+    try {
+      const message = await client.messages.create({
+        model: MODEL,
+        max_tokens: 2048,
+        system: GENERATE_TEMPLATE_PROMPT,
+        messages: [{ role: 'user', content: `대본:\n${script.trim()}` }],
+      });
+      const result = parseJsonFromText(message.content[0].text);
+
+      if (result.isNewType && result.hookType) {
+        const existing = await db.collection('newHookTypes')
+          .where('hookType', '==', result.hookType)
+          .limit(1)
+          .get();
+
+        if (existing.empty) {
+          await db.collection('newHookTypes').add({
+            hookType: result.hookType,
+            scriptExample: script.trim(),
+            discoveredAt: admin.firestore.FieldValue.serverTimestamp(),
+          });
+        }
+      }
+
+      return { success: true, data: result };
+    } catch (e) {
+      console.error('generateTemplate error:', e);
+      if (e instanceof HttpsError) throw e;
+      throw new HttpsError('internal', '템플릿 생성 중 오류가 발생했습니다.');
     }
   }
 );
