@@ -48,7 +48,7 @@ export default function App() {
   }
 
   const isLoggedIn = !!user;
-  const hasOnboarded = !!(userData?.shopType);
+  const hasOnboarded = !!userData;
 
   return (
     <AppContext.Provider value={{ user, userData, setUserData }}>

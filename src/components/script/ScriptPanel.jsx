@@ -43,7 +43,7 @@ function SectionEditor({ label, value, onChange, hint, placeholder, rows = 3 }) 
 }
 
 export default function ScriptPanel({ analysis }) {
-  const { user, userData } = useApp();
+  const { user } = useApp();
   const [productName, setProductName] = useState('');
   const [features, setFeatures] = useState('');
   const [hook, setHook] = useState('');
@@ -62,8 +62,7 @@ export default function ScriptPanel({ analysis }) {
       const result = await generateDraft(
         productName.trim(),
         features.trim(),
-        analysis,
-        userData?.shopType || 'women'
+        analysis
       );
       setHook(result.hook || '');
       setBody(result.body || '');
@@ -89,7 +88,6 @@ export default function ScriptPanel({ analysis }) {
         hook,
         body,
         cta,
-        shopType: userData?.shopType || 'women',
         createdAt: serverTimestamp(),
       });
       setSaved(true);

@@ -4,14 +4,8 @@ import { signOut } from 'firebase/auth';
 import { auth } from '../../firebase/config';
 import { useApp } from '../../App';
 
-const SHOP_TYPE_BADGE = {
-  women: { label: '여성의류', className: 'bg-pink-100 text-pink-700' },
-  men: { label: '남성의류', className: 'bg-blue-100 text-blue-700' },
-  both: { label: '여성 + 남성', className: 'bg-purple-100 text-purple-700' },
-};
-
 export default function Navbar() {
-  const { user, userData } = useApp();
+  const { user } = useApp();
   const navigate = useNavigate();
   const [accountOpen, setAccountOpen] = useState(false);
 
@@ -19,8 +13,6 @@ export default function Navbar() {
     await signOut(auth);
     navigate('/login');
   }
-
-  const badge = userData?.shopType ? SHOP_TYPE_BADGE[userData.shopType] : null;
 
   return (
     <nav className="h-14 bg-white border-b border-gray-200 flex items-center px-5 gap-4 flex-shrink-0 z-10">
@@ -32,12 +24,6 @@ export default function Navbar() {
         </div>
         <span className="font-bold text-gray-900 text-base">릴스랩</span>
       </Link>
-
-      {badge && (
-        <span className={`text-xs font-semibold px-2.5 py-1 rounded-full ${badge.className}`}>
-          {badge.label}
-        </span>
-      )}
 
       <div className="flex-1" />
 

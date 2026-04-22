@@ -6,7 +6,6 @@ import {
   refineSentence,
   refineAnalysis,
 } from '../../services/anthropic';
-import { useApp } from '../../App';
 
 const TAG_STYLES = {
   후킹: 'bg-orange-100 text-orange-700',
@@ -26,7 +25,7 @@ function highlightWord(sentence, word) {
   );
 }
 
-function WordContextPopup({ word, sentence, shopType, totalCount, currentIndex, onAnswer, onSkip }) {
+function WordContextPopup({ word, sentence, fullScript, totalCount, currentIndex, onAnswer, onSkip }) {
   const [options, setOptions] = useState(null);
   const [optionsLoading, setOptionsLoading] = useState(true);
   const [selected, setSelected] = useState(null);
@@ -39,13 +38,13 @@ function WordContextPopup({ word, sentence, shopType, totalCount, currentIndex, 
     setSelected(null);
     setCustomInput('');
 
-    generateContextOptions(word, sentence, shopType)
+    generateContextOptions(word, sentence, fullScript)
       .then((data) => { if (!cancelled) setOptions(data.options); })
       .catch((e) => { console.error('generateContextOptions failed:', e); })
       .finally(() => { if (!cancelled) setOptionsLoading(false); });
 
     return () => { cancelled = true; };
-  }, [word, sentence, shopType]);
+  }, [word, sentence, fullScript]);
 
   const isLast = currentIndex === totalCount - 1;
   const canProceed = selected !== null && (selected !== 'custom' || customInput.trim());
@@ -256,7 +255,6 @@ function SentenceCard({ sentence, onUpdate }) {
 }
 
 export default function ReferencePanel({ onAnalysisDone }) {
-  const { userData } = useApp();
   const [text, setText] = useState('');
   const [loading, setLoading] = useState(false);
   const [analysis, setAnalysis] = useState(null);
@@ -270,8 +268,6 @@ export default function ReferencePanel({ onAnalysisDone }) {
   // 전체 피드백
   const [overallFeedback, setOverallFeedback] = useState({ open: false, text: '', loading: false, error: '' });
 
-  const shopType = userData?.shopType === 'both' ? 'women' : userData?.shopType || 'women';
-
   async function handleAnalyzeClick() {
     if (!text.trim()) return;
     setLoading(true);
@@ -282,7 +278,7 @@ export default function ReferencePanel({ onAnalysisDone }) {
     setContextAnswers([]);
 
     try {
-      const result = await analyzeReference(text.trim(), shopType);
+      const result = await analyzeReference(text.trim());
       if (result.needsContext && result.words?.length > 0) {
         setBaseAnalysis(result.data);
         setContextQueue(result.words);
@@ -529,7 +525,7 @@ export default function ReferencePanel({ onAnalysisDone }) {
         <WordContextPopup
           word={currentWord}
           sentence={currentSentence}
-          shopType={shopType}
+          fullScript={text}
           totalCount={contextQueue.length + contextAnswers.length}
           currentIndex={contextAnswers.length}
           onAnswer={handleWordAnswer}

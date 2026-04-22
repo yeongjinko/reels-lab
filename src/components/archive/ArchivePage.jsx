@@ -3,12 +3,6 @@ import { collection, query, where, orderBy, onSnapshot, deleteDoc, doc } from 'f
 import { db } from '../../firebase/config';
 import { useApp } from '../../App';
 
-const SHOP_TYPE_BADGE = {
-  women: { label: '여성의류', className: 'bg-pink-100 text-pink-700' },
-  men: { label: '남성의류', className: 'bg-blue-100 text-blue-700' },
-  both: { label: '여성+남성', className: 'bg-purple-100 text-purple-700' },
-};
-
 function ScriptDetailModal({ script, onClose }) {
   const [copied, setCopied] = useState(false);
 
@@ -25,7 +19,6 @@ function ScriptDetailModal({ script, onClose }) {
     setTimeout(() => setCopied(false), 1500);
   }
 
-  const badge = SHOP_TYPE_BADGE[script.shopType];
   const date = script.createdAt?.toDate?.()?.toLocaleDateString('ko-KR', {
     year: 'numeric', month: 'long', day: 'numeric'
   });
@@ -35,14 +28,7 @@ function ScriptDetailModal({ script, onClose }) {
       <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg max-h-[85vh] flex flex-col">
         <div className="flex items-start justify-between p-6 border-b border-gray-100 flex-shrink-0">
           <div>
-            <div className="flex items-center gap-2 mb-1">
-              <h2 className="text-lg font-bold text-gray-900">{script.productName}</h2>
-              {badge && (
-                <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${badge.className}`}>
-                  {badge.label}
-                </span>
-              )}
-            </div>
+            <h2 className="text-lg font-bold text-gray-900 mb-1">{script.productName}</h2>
             {date && <p className="text-xs text-gray-400">{date}</p>}
             {script.features && <p className="text-sm text-gray-500 mt-1">{script.features}</p>}
           </div>
@@ -162,7 +148,6 @@ export default function ArchivePage() {
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
               {scripts.map((script) => {
-                const badge = SHOP_TYPE_BADGE[script.shopType];
                 const date = script.createdAt?.toDate?.()?.toLocaleDateString('ko-KR', {
                   year: 'numeric', month: 'short', day: 'numeric'
                 });
@@ -202,13 +187,8 @@ export default function ArchivePage() {
                       <p className="text-xs text-gray-600 line-clamp-2 mb-3">{script.hook}</p>
                     )}
 
-                    <div className="flex items-center justify-between">
-                      {badge && (
-                        <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${badge.className}`}>
-                          {badge.label}
-                        </span>
-                      )}
-                      <span className="text-xs text-indigo-500 font-medium ml-auto opacity-0 group-hover:opacity-100 transition-opacity">
+                    <div className="flex justify-end">
+                      <span className="text-xs text-indigo-500 font-medium opacity-0 group-hover:opacity-100 transition-opacity">
                         자세히 보기 →
                       </span>
                     </div>

@@ -10,13 +10,13 @@ const refineAnalysisFn = httpsCallable(functions, 'refineAnalysis');
 const generateContextOptionsFn = httpsCallable(functions, 'generateContextOptions');
 const updateSentencesWithContextFn = httpsCallable(functions, 'updateSentencesWithContext');
 
-export async function analyzeReference(text, shopType) {
-  const result = await analyzeScriptFn({ text, shopType });
+export async function analyzeReference(text) {
+  const result = await analyzeScriptFn({ text });
   return result.data; // { success, needsContext, words?, data }
 }
 
-export async function generateContextOptions(word, sentence, shopType) {
-  const result = await generateContextOptionsFn({ word, sentence, shopType });
+export async function generateContextOptions(word, sentence, fullScript) {
+  const result = await generateContextOptionsFn({ word, sentence, fullScript });
   return result.data.data; // { options: [{ label, effect }] }
 }
 
@@ -35,7 +35,7 @@ export async function refineAnalysis(sentences, hookFormula, hookFormulaDesc, fe
   return result.data.data; // { hookFormula, hookFormulaDesc, sentences }
 }
 
-export async function generateDraft(productName, features, analysis, shopType) {
-  const result = await generateScriptFn({ productName, features, analysis, shopType });
+export async function generateDraft(productName, features, analysis) {
+  const result = await generateScriptFn({ productName, features, analysis });
   return result.data.data;
 }
