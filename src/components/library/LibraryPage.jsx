@@ -49,7 +49,7 @@ function DetailModal({ item, onClose, onAnalyze }) {
                   </span>
                 )}
               </div>
-              <h3 className="text-base font-bold text-gray-900 leading-snug">{getTitle(item.script)}</h3>
+              <h3 className="text-base font-bold text-gray-900 leading-snug">{item.title || getTitle(item.script)}</h3>
               {item.link && (
                 <a
                   href={item.link}
@@ -291,6 +291,7 @@ export default function LibraryPage() {
   const [detailItem, setDetailItem] = useState(null);
 
   const [showForm, setShowForm] = useState(false);
+  const [formTitle, setFormTitle] = useState('');
   const [formLink, setFormLink] = useState('');
   const [formScript, setFormScript] = useState('');
   const [saving, setSaving] = useState(false);
@@ -301,17 +302,20 @@ export default function LibraryPage() {
     if (!user) { setItemsLoading(false); return; }
     console.log('[LibraryPage] loading items for uid:', user.uid);
     setItemsLoading(true);
+    let settled = false;
+    const finish = () => { if (!settled) { settled = true; setItemsLoading(false); } };
     const q = query(collection(db, 'referenceLibrary'), where('userId', '==', user.uid));
-    return onSnapshot(q,
+    const unsub = onSnapshot(q,
       (snap) => {
         console.log('[LibraryPage] items snapshot:', snap.docs.length);
         setItems(snap.docs
           .map(d => ({ id: d.id, ...d.data() }))
           .sort((a, b) => (b.createdAt?.seconds ?? 0) - (a.createdAt?.seconds ?? 0)));
-        setItemsLoading(false);
+        finish();
       },
-      (err) => { console.error('[LibraryPage] items error:', err); setItemsLoading(false); }
+      (err) => { console.error('[LibraryPage] items error:', err); finish(); }
     );
+    return () => { unsub(); finish(); };
   }, [user]);
 
   useEffect(() => {
@@ -357,13 +361,14 @@ export default function LibraryPage() {
   }
 
   async function handleAdd() {
-    if (!formScript.trim() || !user) return;
+    if (!formTitle.trim() || !formScript.trim() || !user) return;
     setSaving(true);
     try {
       const folderId = (selectedFolderId && selectedFolderId !== 'uncat') ? selectedFolderId : null;
       await addDoc(collection(db, 'referenceLibrary'), {
         userId: user.uid,
         createdAt: serverTimestamp(),
+        title: formTitle.trim(),
         link: formLink.trim() || null,
         script: formScript.trim(),
         preview: formScript.trim().slice(0, 50),
@@ -374,6 +379,7 @@ export default function LibraryPage() {
         analysis: null,
         folderId,
       });
+      setFormTitle('');
       setFormLink('');
       setFormScript('');
       setShowForm(false);
@@ -506,11 +512,18 @@ export default function LibraryPage() {
 
                   {/* 중간: 제목 + 대본 미리보기 */}
                   <div className="flex-1 px-3 overflow-hidden flex flex-col gap-1.5 min-h-0">
-                    <p className="text-xs font-bold text-gray-800 leading-snug line-clamp-2">
-                      {getTitle(item.script)}
-                    </p>
-                    <p className="text-[11px] text-gray-500 leading-relaxed line-clamp-[8] whitespace-pre-wrap">
-                      {getBody(item.script)}
+                    <div className="flex items-start gap-1">
+                      <p className="text-xs font-bold text-gray-800 leading-snug line-clamp-2 flex-1">
+                        {item.title || getTitle(item.script)}
+                      </p>
+                      {item.link && (
+                        <svg className="w-3 h-3 text-gray-300 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+                        </svg>
+                      )}
+                    </div>
+                    <p className="text-[11px] text-gray-500 leading-relaxed line-clamp-6 whitespace-pre-wrap">
+                      {item.script}
                     </p>
                   </div>
 
@@ -571,13 +584,26 @@ export default function LibraryPage() {
             <div className="px-6 py-5 flex flex-col gap-4">
               <div>
                 <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1.5">
-                  링크 <span className="font-normal text-gray-400 normal-case">(선택사항 · 인스타/틱톡 URL)</span>
+                  제목/주제명 <span className="text-red-400">*</span>
+                </label>
+                <input
+                  type="text"
+                  value={formTitle}
+                  onChange={e => setFormTitle(e.target.value)}
+                  placeholder="예) 룰루레몬 브랜드반전 릴스"
+                  autoFocus
+                  className="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1.5">
+                  링크 <span className="font-normal text-gray-400 normal-case">(선택사항)</span>
                 </label>
                 <input
                   type="url"
                   value={formLink}
                   onChange={e => setFormLink(e.target.value)}
-                  placeholder="https://www.instagram.com/reel/..."
+                  placeholder="인스타/틱톡 URL"
                   className="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
                 />
               </div>
@@ -588,9 +614,8 @@ export default function LibraryPage() {
                 <textarea
                   value={formScript}
                   onChange={e => setFormScript(e.target.value)}
-                  placeholder="레퍼런스 대본을 붙여넣으세요..."
+                  placeholder="대본을 입력하세요"
                   rows={6}
-                  autoFocus
                   className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent bg-gray-50 placeholder-gray-400 resize-none"
                 />
               </div>
@@ -603,7 +628,7 @@ export default function LibraryPage() {
             <div className="px-6 pb-6 flex gap-2">
               <button
                 onClick={handleAdd}
-                disabled={!formScript.trim() || saving}
+                disabled={!formTitle.trim() || !formScript.trim() || saving}
                 className="flex-1 flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-300 text-white font-semibold py-2.5 rounded-xl transition-colors text-sm"
               >
                 {saving && <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />}
