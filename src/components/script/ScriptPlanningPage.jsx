@@ -4,6 +4,7 @@ import ScriptPanel from './ScriptPanel';
 
 export default function ScriptPlanningPage() {
   const [analysis, setAnalysis] = useState(null);
+  const [referenceText, setReferenceText] = useState('');
 
   return (
     <div className="h-full flex flex-col">
@@ -14,10 +15,13 @@ export default function ScriptPlanningPage() {
 
       <div className="flex flex-1 overflow-hidden gap-0">
         <div className="w-1/2 border-r border-gray-200 bg-white overflow-hidden flex flex-col">
-          <ReferencePanel onAnalysisDone={setAnalysis} />
+          <ReferencePanel
+            onAnalysisDone={setAnalysis}
+            onReferenceText={setReferenceText}
+          />
         </div>
         <div className="w-1/2 bg-white overflow-hidden flex flex-col">
-          <ScriptPanel analysis={analysis} />
+          <ScriptPanel analysis={analysis} referenceText={referenceText} />
         </div>
       </div>
     </div>

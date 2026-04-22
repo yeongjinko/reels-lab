@@ -254,7 +254,7 @@ function SentenceCard({ sentence, onUpdate }) {
   );
 }
 
-export default function ReferencePanel({ onAnalysisDone }) {
+export default function ReferencePanel({ onAnalysisDone, onReferenceText }) {
   const [text, setText] = useState('');
   const [loading, setLoading] = useState(false);
   const [analysis, setAnalysis] = useState(null);
@@ -282,10 +282,12 @@ export default function ReferencePanel({ onAnalysisDone }) {
       if (result.needsContext && result.words?.length > 0) {
         setBaseAnalysis(result.data);
         setContextQueue(result.words);
+        onReferenceText?.(text.trim());
         setLoading(false);
       } else {
         setAnalysis(result.data);
         onAnalysisDone?.(result.data);
+        onReferenceText?.(text.trim());
         setLoading(false);
       }
     } catch (e) {
