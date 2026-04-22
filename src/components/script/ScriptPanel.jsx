@@ -5,22 +5,15 @@ import { useApp } from '../../App';
 import { generateTemplate } from '../../services/anthropic';
 import TemplateEditor from '../common/TemplateEditor';
 
-const CATEGORIES = [
-  { id: '의류', icon: '👗' },
-  { id: '뷰티', icon: '💄' },
-  { id: '식품', icon: '🍱' },
-  { id: '생활용품', icon: '🏠' },
-  { id: '기타', icon: '📦' },
-];
-
-export default function ScriptPanel({ analysis, referenceText, initialTemplateData }) {
+export default function ScriptPanel({ analysis, referenceText, referenceId, initialTemplateData }) {
   const { user } = useApp();
   const [templateData, setTemplateData] = useState(initialTemplateData || null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [categoryPopup, setCategoryPopup] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [completedScript, setCompletedScript] = useState('');
+  const [allFilled, setAllFilled] = useState(false);
   const initialRef = useRef(initialTemplateData);
 
   useEffect(() => {
@@ -34,35 +27,28 @@ export default function ScriptPanel({ analysis, referenceText, initialTemplateDa
     setError('');
     setTemplateData(null);
     setSaved(false);
+    setCompletedScript('');
+    setAllFilled(false);
     generateTemplate(referenceText)
       .then((data) => setTemplateData(data))
       .catch((e) => setError(e.message || '템플릿 생성 중 오류가 발생했습니다.'))
       .finally(() => setLoading(false));
   }, [referenceText]);
 
-  async function handleSave(category) {
-    if (!user || !templateData || !referenceText) return;
+  async function handleSave() {
+    if (!user || !completedScript) return;
     setSaving(true);
-    setCategoryPopup(false);
     try {
-      await addDoc(collection(db, 'library'), {
+      await addDoc(collection(db, 'myScripts'), {
         userId: user.uid,
         createdAt: serverTimestamp(),
-        script: referenceText,
-        hookType: templateData.hookType || '',
-        isNewType: templateData.isNewType || false,
-        empathyPoint: templateData.empathyPoint || '',
-        empathyTags: templateData.empathyTags || [],
-        category,
-        preview: referenceText.slice(0, 50),
-        hookFormula: analysis?.hookFormula || '',
-        hookFormulaDesc: analysis?.hookFormulaDesc || '',
-        sentences: analysis?.sentences || [],
-        template: templateData.template || '',
+        script: completedScript,
+        preview: completedScript.slice(0, 50),
+        referenceId: referenceId || null,
       });
       setSaved(true);
     } catch (e) {
-      console.error('library save failed:', e);
+      console.error('myScripts save failed:', e);
     } finally {
       setSaving(false);
     }
@@ -133,76 +119,58 @@ export default function ScriptPanel({ analysis, referenceText, initialTemplateDa
                 <span className="text-xs font-bold text-indigo-700 uppercase tracking-wider">내 스크립트 템플릿</span>
               </div>
               <p className="text-xs text-gray-400 mb-3">노란 빈칸을 클릭해서 내 상품에 맞게 채워보세요</p>
-              <TemplateEditor key={templateData.template} template={templateData.template} />
+              <TemplateEditor
+                key={templateData.template}
+                template={templateData.template}
+                onChange={(script, filled) => {
+                  setCompletedScript(script);
+                  setAllFilled(filled);
+                  if (saved) setSaved(false);
+                }}
+              />
             </div>
 
-            {/* 라이브러리 저장 */}
-            <div className="border-t border-gray-100 pt-4">
-              <button
-                onClick={() => setCategoryPopup(true)}
-                disabled={saving || saved}
-                className={`w-full flex items-center justify-center gap-2 font-semibold py-2.5 rounded-xl transition-colors text-sm ${
-                  saved
-                    ? 'bg-emerald-50 text-emerald-600 border border-emerald-200 cursor-default'
-                    : saving
-                    ? 'bg-gray-100 text-gray-400 cursor-wait'
-                    : 'bg-white border border-gray-200 text-gray-700 hover:border-indigo-300 hover:text-indigo-600 hover:bg-indigo-50'
-                }`}
-              >
-                {saved ? (
-                  <>
-                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                    </svg>
-                    라이브러리에 저장됨
-                  </>
-                ) : saving ? (
-                  <>
-                    <div className="w-4 h-4 border-2 border-gray-400 border-t-transparent rounded-full animate-spin" />
-                    저장 중...
-                  </>
-                ) : (
-                  <>
-                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
-                    </svg>
-                    레퍼런스 라이브러리에 저장
-                  </>
-                )}
-              </button>
-            </div>
+            {/* 내 보관함 저장 */}
+            {allFilled && (
+              <div className="border-t border-gray-100 pt-4">
+                <button
+                  onClick={handleSave}
+                  disabled={saving || saved}
+                  className={`w-full flex items-center justify-center gap-2 font-semibold py-2.5 rounded-xl transition-colors text-sm ${
+                    saved
+                      ? 'bg-emerald-50 text-emerald-600 border border-emerald-200 cursor-default'
+                      : saving
+                      ? 'bg-gray-100 text-gray-400 cursor-wait'
+                      : 'bg-indigo-600 hover:bg-indigo-700 text-white'
+                  }`}
+                >
+                  {saved ? (
+                    <>
+                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                      </svg>
+                      내 보관함에 저장됨
+                    </>
+                  ) : saving ? (
+                    <>
+                      <div className="w-4 h-4 border-2 border-gray-400 border-t-transparent rounded-full animate-spin" />
+                      저장 중...
+                    </>
+                  ) : (
+                    <>
+                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4" />
+                      </svg>
+                      내 보관함에 저장
+                    </>
+                  )}
+                </button>
+              </div>
+            )}
 
           </div>
         ) : null}
       </div>
-
-      {/* 카테고리 선택 팝업 */}
-      {categoryPopup && (
-        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm p-6">
-            <h3 className="text-base font-bold text-gray-900 mb-1">카테고리 선택</h3>
-            <p className="text-xs text-gray-500 mb-4">이 레퍼런스의 상품 카테고리를 선택해주세요</p>
-            <div className="grid grid-cols-3 gap-2 mb-4">
-              {CATEGORIES.map((cat) => (
-                <button
-                  key={cat.id}
-                  onClick={() => handleSave(cat.id)}
-                  className="flex flex-col items-center gap-1.5 p-3 rounded-xl border-2 border-gray-200 hover:border-indigo-400 hover:bg-indigo-50 transition-all"
-                >
-                  <span className="text-xl">{cat.icon}</span>
-                  <span className="text-xs font-semibold text-gray-700">{cat.id}</span>
-                </button>
-              ))}
-            </div>
-            <button
-              onClick={() => setCategoryPopup(false)}
-              className="w-full text-sm text-gray-400 hover:text-gray-600 py-2 transition-colors"
-            >
-              취소
-            </button>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

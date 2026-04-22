@@ -9,6 +9,7 @@ export default function ScriptPlanningPage() {
 
   const [analysis, setAnalysis] = useState(libraryItem?.analysis || null);
   const [referenceText, setReferenceText] = useState(libraryItem?.script || '');
+  const [referenceId, setReferenceId] = useState(libraryItem?.id || null);
 
   return (
     <div className="h-full flex flex-col">
@@ -22,6 +23,7 @@ export default function ScriptPlanningPage() {
           <ReferencePanel
             onAnalysisDone={setAnalysis}
             onReferenceText={setReferenceText}
+            onReferenceId={setReferenceId}
             initialText={libraryItem?.script}
             initialAnalysis={libraryItem?.analysis}
           />
@@ -30,6 +32,7 @@ export default function ScriptPlanningPage() {
           <ScriptPanel
             analysis={analysis}
             referenceText={referenceText}
+            referenceId={referenceId}
             initialTemplateData={libraryItem?.templateData}
           />
         </div>

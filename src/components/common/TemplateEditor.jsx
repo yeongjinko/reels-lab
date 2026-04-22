@@ -22,7 +22,7 @@ export function parseTemplate(template) {
   return parts;
 }
 
-export default function TemplateEditor({ template }) {
+export default function TemplateEditor({ template, onChange }) {
   const [values, setValues] = useState({});
   const [activeIdx, setActiveIdx] = useState(null);
   const [copied, setCopied] = useState(false);
@@ -34,6 +34,19 @@ export default function TemplateEditor({ template }) {
   const completedScript = parts
     .map((p) => (p.type === 'text' ? p.content : values[p.idx] || `[${p.hint}]`))
     .join('');
+
+  function updateValues(updater) {
+    setValues((prev) => {
+      const next = updater(prev);
+      if (onChange) {
+        const script = parts
+          .map((p) => (p.type === 'text' ? p.content : next[p.idx] || `[${p.hint}]`))
+          .join('');
+        onChange(script, parts.filter((q) => q.type === 'placeholder').every((q) => next[q.idx]));
+      }
+      return next;
+    });
+  }
 
   function handleCopy() {
     navigator.clipboard.writeText(completedScript);
@@ -58,7 +71,7 @@ export default function TemplateEditor({ template }) {
                 key={i}
                 autoFocus
                 value={value}
-                onChange={(e) => setValues((v) => ({ ...v, [part.idx]: e.target.value }))}
+                onChange={(e) => updateValues((v) => ({ ...v, [part.idx]: e.target.value }))}
                 onBlur={() => setActiveIdx(null)}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter') { e.preventDefault(); setActiveIdx(null); }
