@@ -7,6 +7,7 @@ import { db } from '../../firebase/config';
 import { useApp } from '../../App';
 import {
   analyzeReference,
+  generateTemplate,
   generateContextOptions,
   updateSentencesWithContext,
   refineSentence,
@@ -126,7 +127,7 @@ function WordContextPopup({ word, sentence, fullScript, totalCount, currentIndex
   const [loadError, setLoadError] = useState(false);
   const [retryCount, setRetryCount] = useState(0);
   const [elapsed, setElapsed] = useState(0);
-  const [selected, setSelected] = useState(null);
+  const [selectedSet, setSelectedSet] = useState(new Set());
   const [customInput, setCustomInput] = useState('');
   const cancelledRef = useRef(false);
 
@@ -158,7 +159,7 @@ function WordContextPopup({ word, sentence, fullScript, totalCount, currentIndex
 
   useEffect(() => {
     cancelledRef.current = false;
-    setSelected(null);
+    setSelectedSet(new Set());
     setCustomInput('');
     setRetryCount(0);
     doFetch();
@@ -171,18 +172,28 @@ function WordContextPopup({ word, sentence, fullScript, totalCount, currentIndex
     return () => clearInterval(interval);
   }, [optionsLoading]);
 
+  function toggleOption(i) {
+    setSelectedSet((prev) => {
+      const next = new Set(prev);
+      next.has(i) ? next.delete(i) : next.add(i);
+      return next;
+    });
+  }
+
   function handleRetry() {
     setRetryCount((r) => r + 1);
     doFetch();
   }
 
   const isLast = currentIndex === totalCount - 1;
-  const canProceed = selected !== null && (selected !== 'custom' || customInput.trim());
+  const hasSelection = selectedSet.size > 0 || customInput.trim();
 
   function handleProceed() {
-    if (!canProceed) return;
-    const label = selected === 'custom' ? customInput.trim() : options[selected].label;
-    onAnswer({ word, label });
+    if (!hasSelection) { onSkip(); return; }
+    const labels = [];
+    if (options) [...selectedSet].forEach((i) => labels.push(options[i].label));
+    if (customInput.trim()) labels.push(customInput.trim());
+    onAnswer({ word, label: labels.join(', ') });
   }
 
   return (
@@ -205,6 +216,7 @@ function WordContextPopup({ word, sentence, fullScript, totalCount, currentIndex
           <h2 className="text-base font-bold text-gray-900">
             이 영상에서 <span className="text-indigo-600">"{word}"</span>는 어떤 의미로 쓰였나요?
           </h2>
+          <p className="text-xs text-gray-400 mt-1">해당하는 것을 모두 선택하세요. 선택하지 않아도 분석이 진행됩니다.</p>
         </div>
 
         <div className="flex-1 overflow-y-auto px-6 pb-2">
@@ -237,32 +249,49 @@ function WordContextPopup({ word, sentence, fullScript, totalCount, currentIndex
             </div>
           ) : (
             <div className="flex flex-col gap-2">
-              {options?.map((opt, i) => (
-                <button key={i} onClick={() => setSelected(i)} className={`w-full text-left px-4 py-3 rounded-xl border-2 transition-all ${selected === i ? 'bg-indigo-50 border-indigo-400' : 'bg-white border-gray-200 hover:border-gray-300'}`}>
-                  <p className={`text-sm font-semibold ${selected === i ? 'text-indigo-800' : 'text-gray-800'}`}>{opt.label}</p>
-                  <p className={`text-xs mt-0.5 leading-relaxed ${selected === i ? 'text-indigo-600' : 'text-gray-400'}`}>{opt.effect}</p>
-                </button>
-              ))}
-              <button onClick={() => setSelected('custom')} className={`w-full text-left px-4 py-3 rounded-xl border-2 transition-all ${selected === 'custom' ? 'bg-indigo-50 border-indigo-400' : 'bg-white border-gray-200 hover:border-gray-300'}`}>
-                <p className={`text-sm font-semibold ${selected === 'custom' ? 'text-indigo-800' : 'text-gray-800'}`}>직접 입력</p>
-              </button>
-              {selected === 'custom' && (
+              {options?.map((opt, i) => {
+                const checked = selectedSet.has(i);
+                return (
+                  <button key={i} onClick={() => toggleOption(i)} className={`w-full text-left px-4 py-3 rounded-xl border-2 transition-all flex items-start gap-3 ${checked ? 'bg-indigo-50 border-indigo-400' : 'bg-white border-gray-200 hover:border-gray-300'}`}>
+                    <div className={`w-5 h-5 rounded flex-shrink-0 mt-0.5 flex items-center justify-center border-2 transition-colors ${checked ? 'bg-indigo-500 border-indigo-500' : 'border-gray-300 bg-white'}`}>
+                      {checked && (
+                        <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                        </svg>
+                      )}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className={`text-sm font-semibold ${checked ? 'text-indigo-800' : 'text-gray-800'}`}>{opt.label}</p>
+                      <p className={`text-xs mt-0.5 leading-relaxed ${checked ? 'text-indigo-600' : 'text-gray-400'}`}>{opt.effect}</p>
+                    </div>
+                  </button>
+                );
+              })}
+
+              {/* 직접 입력 */}
+              <div className={`rounded-xl border-2 px-4 py-3 transition-all ${customInput.trim() ? 'bg-indigo-50 border-indigo-400' : 'bg-white border-gray-200'}`}>
+                <p className={`text-sm font-semibold mb-1.5 ${customInput.trim() ? 'text-indigo-800' : 'text-gray-800'}`}>직접 입력</p>
                 <input
                   type="text"
                   value={customInput}
                   onChange={(e) => setCustomInput(e.target.value)}
-                  placeholder={`"${word}"에 대해 설명해주세요`}
-                  className="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                  autoFocus
+                  placeholder={`"${word}"에 대해 직접 설명해주세요`}
+                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent bg-white placeholder-gray-400"
                 />
-              )}
+              </div>
             </div>
           )}
         </div>
 
         <div className="px-6 pt-3 pb-5 border-t border-gray-100 flex flex-col gap-2 flex-shrink-0">
-          <button onClick={handleProceed} disabled={!canProceed || optionsLoading} className="w-full bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-300 disabled:cursor-not-allowed text-white font-semibold py-2.5 rounded-xl transition-colors">
-            {isLast ? '맥락 반영해서 분석하기' : '다음'}
+          <button
+            onClick={handleProceed}
+            disabled={optionsLoading}
+            className="w-full bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-300 disabled:cursor-not-allowed text-white font-semibold py-2.5 rounded-xl transition-colors"
+          >
+            {hasSelection
+              ? (isLast ? '맥락 반영해서 분석하기' : `선택 완료 (${selectedSet.size + (customInput.trim() ? 1 : 0)}개)`)
+              : (isLast ? '선택 없이 분석하기' : '선택 없이 넘어가기')}
           </button>
           <button onClick={onSkip} className="w-full text-gray-400 hover:text-gray-600 text-sm py-2 transition-colors">
             모르겠으면 넘어가기
@@ -348,7 +377,7 @@ function SentenceCard({ sentence, onUpdate }) {
   );
 }
 
-export default function ReferencePanel({ onAnalysisDone, onReferenceText, onReferenceId, initialText, initialAnalysis }) {
+export default function ReferencePanel({ onAnalysisDone, onReferenceText, onReferenceId, initialText, initialAnalysis, initialReferenceId }) {
   const { user } = useApp();
   const [text, setText] = useState(initialText || '');
   const [loading, setLoading] = useState(false);
@@ -362,8 +391,7 @@ export default function ReferencePanel({ onAnalysisDone, onReferenceText, onRefe
 
   const [overallFeedback, setOverallFeedback] = useState({ open: false, text: '', loading: false, error: '' });
 
-  // docRef for the referenceLibrary entry being analyzed
-  const refDocRef = useRef(null);
+  const refDocRef = useRef(initialReferenceId || null);
 
   async function handleAnalyzeClick() {
     if (!text.trim()) return;
@@ -422,12 +450,23 @@ export default function ReferencePanel({ onAnalysisDone, onReferenceText, onRefe
 
     if (docId && user) {
       try {
+        let empathyPoint = null;
+        let empathyTags = [];
+        let hookType = analysisData.hookFormulaType || null;
+        try {
+          const templateResult = await generateTemplate(text.trim());
+          hookType = templateResult.hookType || hookType;
+          empathyPoint = templateResult.empathyPoint || null;
+          empathyTags = templateResult.empathyTags || [];
+        } catch (e) {
+          console.error('generateTemplate failed:', e);
+        }
         await updateDoc(doc(db, 'referenceLibrary', docId), {
           analyzed: true,
           analysis: analysisData,
-          hookType: analysisData.hookFormulaType || null,
-          empathyPoint: null,
-          empathyTags: [],
+          hookType,
+          empathyPoint,
+          empathyTags,
         });
       } catch (e) {
         console.error('referenceLibrary update failed:', e);
