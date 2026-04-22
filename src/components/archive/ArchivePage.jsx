@@ -1,33 +1,44 @@
 import React, { useEffect, useState } from 'react';
-import { collection, query, where, orderBy, onSnapshot, deleteDoc, doc } from 'firebase/firestore';
+import { collection, query, where, onSnapshot, deleteDoc, doc } from 'firebase/firestore';
 import { db } from '../../firebase/config';
 import { useApp } from '../../App';
 
 export default function ArchivePage() {
   const { user } = useApp();
   const [scripts, setScripts] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [deleting, setDeleting] = useState(null);
   const [copiedId, setCopiedId] = useState(null);
 
   useEffect(() => {
-    if (!user) { setLoading(false); return; }
+    if (!user) {
+      console.log('[ArchivePage] user is null, skipping query');
+      setLoading(false);
+      return;
+    }
+    console.log('[ArchivePage] starting Firestore query for uid:', user.uid);
+    setLoading(true);
+    // orderBy 제거 → 복합 인덱스 불필요, 클라이언트에서 정렬
     const q = query(
       collection(db, 'myScripts'),
-      where('userId', '==', user.uid),
-      orderBy('createdAt', 'desc')
+      where('userId', '==', user.uid)
     );
-    return onSnapshot(
+    const unsub = onSnapshot(
       q,
       (snap) => {
-        setScripts(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+        console.log('[ArchivePage] snapshot received, docs:', snap.docs.length);
+        const sorted = snap.docs
+          .map((d) => ({ id: d.id, ...d.data() }))
+          .sort((a, b) => (b.createdAt?.seconds ?? 0) - (a.createdAt?.seconds ?? 0));
+        setScripts(sorted);
         setLoading(false);
       },
       (err) => {
-        console.error('myScripts snapshot error:', err);
+        console.error('[ArchivePage] snapshot error:', err);
         setLoading(false);
       }
     );
+    return unsub;
   }, [user]);
 
   async function handleDelete(e, id) {

@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import {
   collection, addDoc, deleteDoc, doc,
-  query, where, orderBy, onSnapshot, serverTimestamp,
+  query, where, onSnapshot, serverTimestamp,
 } from 'firebase/firestore';
 import { useNavigate } from 'react-router-dom';
 import { db } from '../../firebase/config';
@@ -11,7 +11,7 @@ export default function LibraryPage() {
   const { user } = useApp();
   const navigate = useNavigate();
   const [items, setItems] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [showForm, setShowForm] = useState(false);
   const [formLink, setFormLink] = useState('');
   const [formScript, setFormScript] = useState('');
@@ -19,23 +19,34 @@ export default function LibraryPage() {
   const [deleting, setDeleting] = useState(null);
 
   useEffect(() => {
-    if (!user) { setLoading(false); return; }
+    if (!user) {
+      console.log('[LibraryPage] user is null, skipping query');
+      setLoading(false);
+      return;
+    }
+    console.log('[LibraryPage] starting Firestore query for uid:', user.uid);
+    setLoading(true);
+    // orderBy 제거 → 복합 인덱스 불필요, 클라이언트에서 정렬
     const q = query(
       collection(db, 'referenceLibrary'),
-      where('userId', '==', user.uid),
-      orderBy('createdAt', 'desc')
+      where('userId', '==', user.uid)
     );
-    return onSnapshot(
+    const unsub = onSnapshot(
       q,
       (snap) => {
-        setItems(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+        console.log('[LibraryPage] snapshot received, docs:', snap.docs.length);
+        const sorted = snap.docs
+          .map((d) => ({ id: d.id, ...d.data() }))
+          .sort((a, b) => (b.createdAt?.seconds ?? 0) - (a.createdAt?.seconds ?? 0));
+        setItems(sorted);
         setLoading(false);
       },
       (err) => {
-        console.error('referenceLibrary snapshot error:', err);
+        console.error('[LibraryPage] snapshot error:', err);
         setLoading(false);
       }
     );
+    return unsub;
   }, [user]);
 
   async function handleAdd() {
