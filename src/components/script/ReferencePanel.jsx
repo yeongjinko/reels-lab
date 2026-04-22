@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   analyzeReference,
   generateContextOptions,
@@ -25,26 +25,64 @@ function highlightWord(sentence, word) {
   );
 }
 
+const CONTEXT_TIMEOUT_MS = 30000;
+const MAX_RETRIES = 2;
+
 function WordContextPopup({ word, sentence, fullScript, totalCount, currentIndex, onAnswer, onSkip }) {
   const [options, setOptions] = useState(null);
   const [optionsLoading, setOptionsLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
+  const [retryCount, setRetryCount] = useState(0);
+  const [elapsed, setElapsed] = useState(0);
   const [selected, setSelected] = useState(null);
   const [customInput, setCustomInput] = useState('');
+  const cancelledRef = useRef(false);
+
+  function doFetch() {
+    setOptionsLoading(true);
+    setLoadError(false);
+    setOptions(null);
+    setElapsed(0);
+
+    const timeoutPromise = new Promise((_, reject) =>
+      setTimeout(() => reject(new Error('timeout')), CONTEXT_TIMEOUT_MS)
+    );
+
+    Promise.race([generateContextOptions(word, sentence, fullScript), timeoutPromise])
+      .then((data) => {
+        if (!cancelledRef.current) {
+          setOptions(data.options);
+          setOptionsLoading(false);
+        }
+      })
+      .catch((e) => {
+        console.error('generateContextOptions failed:', e);
+        if (!cancelledRef.current) {
+          setLoadError(true);
+          setOptionsLoading(false);
+        }
+      });
+  }
 
   useEffect(() => {
-    let cancelled = false;
-    setOptionsLoading(true);
-    setOptions(null);
+    cancelledRef.current = false;
     setSelected(null);
     setCustomInput('');
+    setRetryCount(0);
+    doFetch();
+    return () => { cancelledRef.current = true; };
+  }, [word, sentence, fullScript]); // eslint-disable-line react-hooks/exhaustive-deps
 
-    generateContextOptions(word, sentence, fullScript)
-      .then((data) => { if (!cancelled) setOptions(data.options); })
-      .catch((e) => { console.error('generateContextOptions failed:', e); })
-      .finally(() => { if (!cancelled) setOptionsLoading(false); });
+  useEffect(() => {
+    if (!optionsLoading) return;
+    const interval = setInterval(() => setElapsed((s) => s + 1), 1000);
+    return () => clearInterval(interval);
+  }, [optionsLoading]);
 
-    return () => { cancelled = true; };
-  }, [word, sentence, fullScript]);
+  function handleRetry() {
+    setRetryCount((r) => r + 1);
+    doFetch();
+  }
 
   const isLast = currentIndex === totalCount - 1;
   const canProceed = selected !== null && (selected !== 'custom' || customInput.trim());
@@ -94,7 +132,34 @@ function WordContextPopup({ word, sentence, fullScript, totalCount, currentIndex
           {optionsLoading ? (
             <div className="flex flex-col items-center justify-center py-10 gap-2">
               <div className="w-5 h-5 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
-              <p className="text-xs text-gray-400">선택지 생성 중...</p>
+              <p className="text-xs text-gray-400">
+                선택지 생성 중...{elapsed > 0 && <span className="ml-1">({elapsed}초)</span>}
+              </p>
+              {elapsed >= 10 && (
+                <p className="text-xs text-gray-300">AI가 대본 전체를 분석하고 있어요</p>
+              )}
+            </div>
+          ) : loadError ? (
+            <div className="flex flex-col items-center gap-3 py-8 px-2 text-center">
+              <div className="w-10 h-10 bg-red-50 rounded-full flex items-center justify-center">
+                <svg className="w-5 h-5 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                </svg>
+              </div>
+              <p className="text-sm text-gray-600">선택지를 불러오지 못했어요.<br />다시 시도할까요?</p>
+              {retryCount < MAX_RETRIES ? (
+                <button
+                  onClick={handleRetry}
+                  className="flex items-center gap-1.5 text-sm font-semibold bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl transition-colors"
+                >
+                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                  </svg>
+                  다시 시도 ({MAX_RETRIES - retryCount}회 남음)
+                </button>
+              ) : (
+                <p className="text-xs text-gray-400">재시도 횟수를 초과했어요. 직접 입력해주세요.</p>
+              )}
             </div>
           ) : (
             <div className="flex flex-col gap-2">
