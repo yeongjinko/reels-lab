@@ -6,35 +6,135 @@ import {
 import { db } from '../../firebase/config';
 import { useApp } from '../../App';
 
+const PencilIcon = () => (
+  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+  </svg>
+);
+
 function ScriptDetailModal({ script, onClose }) {
+  const [editingField, setEditingField] = useState(null);
+  const [editValue, setEditValue] = useState('');
+  const [saving, setSaving] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [localScript, setLocalScript] = useState(script);
+
+  useEffect(() => { setLocalScript(script); }, [script]);
+
   function handleCopy() {
-    navigator.clipboard.writeText(script.script);
+    navigator.clipboard.writeText(localScript.script);
     setCopied(true);
     setTimeout(() => setCopied(false), 1500);
   }
-  const date = script.createdAt?.toDate?.()?.toLocaleDateString('ko-KR', {
+
+  function startEdit(field) {
+    setEditingField(field);
+    setEditValue(field === 'title' ? (localScript.title || '') : localScript.script || '');
+  }
+
+  function cancelEdit() { setEditingField(null); setEditValue(''); }
+
+  async function saveEdit() {
+    if (!editValue.trim()) return;
+    setSaving(true);
+    try {
+      const updates = editingField === 'title'
+        ? { title: editValue.trim() }
+        : { script: editValue.trim(), preview: editValue.trim().slice(0, 50) };
+      await updateDoc(doc(db, 'myScripts', localScript.id), updates);
+      setLocalScript(prev => ({ ...prev, ...updates }));
+      setEditingField(null);
+      setEditValue('');
+    } catch (e) {
+      console.error('update failed:', e);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const date = localScript.createdAt?.toDate?.()?.toLocaleDateString('ko-KR', {
     year: 'numeric', month: 'short', day: 'numeric',
   });
+
   return (
     <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={onClose}>
       <div className="bg-white rounded-2xl shadow-xl w-full max-w-xl max-h-[88vh] flex flex-col" onClick={e => e.stopPropagation()}>
-        <div className="px-6 pt-5 pb-4 border-b border-gray-100 flex-shrink-0 flex items-center justify-between gap-3">
-          <div>
-            <p className="text-xs font-bold text-gray-900">{script.title || '저장된 스크립트'}</p>
-            {date && <p className="text-xs text-gray-400 mt-0.5">{date}</p>}
+        {/* 헤더 */}
+        <div className="px-6 pt-5 pb-4 border-b border-gray-100 flex-shrink-0">
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex-1 min-w-0">
+              {editingField === 'title' ? (
+                <div className="flex items-center gap-2">
+                  <input
+                    value={editValue}
+                    onChange={e => setEditValue(e.target.value)}
+                    onKeyDown={e => { if (e.key === 'Enter') saveEdit(); if (e.key === 'Escape') cancelEdit(); }}
+                    autoFocus
+                    className="flex-1 text-sm font-bold border border-indigo-400 rounded-lg px-2.5 py-1 outline-none focus:ring-2 focus:ring-indigo-500"
+                  />
+                  <button onClick={saveEdit} disabled={saving} className="text-xs bg-indigo-600 text-white px-2.5 py-1 rounded-lg font-semibold hover:bg-indigo-700 disabled:opacity-50 transition-colors">확인</button>
+                  <button onClick={cancelEdit} className="text-xs text-gray-500 px-2 py-1 rounded-lg border border-gray-200 hover:bg-gray-50 transition-colors">취소</button>
+                </div>
+              ) : (
+                <div className="flex items-center gap-1.5 group">
+                  <p className="text-sm font-bold text-gray-900">{localScript.title || '저장된 스크립트'}</p>
+                  <button onClick={() => startEdit('title')} className="opacity-0 group-hover:opacity-100 text-gray-300 hover:text-indigo-500 transition-all flex-shrink-0">
+                    <PencilIcon />
+                  </button>
+                </div>
+              )}
+              {date && <p className="text-xs text-gray-400 mt-0.5">{date}</p>}
+            </div>
+            <button onClick={onClose} className="text-gray-400 hover:text-gray-600 transition-colors flex-shrink-0">
+              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
           </div>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 transition-colors flex-shrink-0">
-            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          </button>
         </div>
+
+        {/* 콘텐츠 */}
         <div className="flex-1 overflow-y-auto px-6 py-5">
-          <div className="bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm text-gray-700 leading-relaxed whitespace-pre-wrap">
-            {script.script}
+          <div className="flex items-center justify-between mb-2">
+            <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider">대본</p>
+            {editingField !== 'script' && (
+              <button onClick={() => startEdit('script')} className="flex items-center gap-1 text-xs text-gray-400 hover:text-indigo-500 transition-colors">
+                <PencilIcon />
+                수정
+              </button>
+            )}
           </div>
+          {editingField === 'script' ? (
+            <div className="flex flex-col gap-2">
+              <textarea
+                value={editValue}
+                onChange={e => setEditValue(e.target.value)}
+                rows={10}
+                autoFocus
+                className="w-full border border-indigo-400 rounded-xl px-4 py-3 text-sm text-gray-700 leading-relaxed outline-none focus:ring-2 focus:ring-indigo-500 resize-none bg-gray-50"
+              />
+              <div className="flex gap-2">
+                <button
+                  onClick={saveEdit}
+                  disabled={saving || !editValue.trim()}
+                  className="flex items-center gap-1.5 text-sm bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-300 text-white px-4 py-2 rounded-xl font-semibold transition-colors"
+                >
+                  {saving && <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />}
+                  저장
+                </button>
+                <button onClick={cancelEdit} className="text-sm text-gray-500 hover:text-gray-700 px-4 py-2 rounded-xl border border-gray-200 hover:bg-gray-50 transition-colors">
+                  취소
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm text-gray-700 leading-relaxed whitespace-pre-wrap">
+              {localScript.script}
+            </div>
+          )}
         </div>
+
+        {/* 하단 */}
         <div className="px-6 py-4 border-t border-gray-100 flex-shrink-0 flex gap-2">
           <button
             onClick={handleCopy}
