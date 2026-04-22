@@ -5,11 +5,25 @@ import ScriptPanel from './ScriptPanel';
 
 export default function ScriptPlanningPage() {
   const location = useLocation();
-  const libraryItem = location.state?.libraryItem;
 
-  const [analysis, setAnalysis] = useState(libraryItem?.analysis || null);
-  const [referenceText, setReferenceText] = useState(libraryItem?.script || '');
-  const [referenceId, setReferenceId] = useState(libraryItem?.id || null);
+  const [pendingItem] = useState(() => {
+    try {
+      const saved = sessionStorage.getItem('pendingLibraryItem');
+      if (saved) {
+        sessionStorage.removeItem('pendingLibraryItem');
+        return JSON.parse(saved);
+      }
+    } catch {}
+    return null;
+  });
+
+  const navState = location.state || {};
+  const initText = pendingItem?.referenceText || navState.referenceText || '';
+  const initRefId = pendingItem?.referenceId || navState.referenceId || null;
+
+  const [analysis, setAnalysis] = useState(null);
+  const [referenceText, setReferenceText] = useState(initText);
+  const [referenceId, setReferenceId] = useState(initRefId);
 
   return (
     <div className="h-full flex flex-col">
@@ -24,8 +38,8 @@ export default function ScriptPlanningPage() {
             onAnalysisDone={setAnalysis}
             onReferenceText={setReferenceText}
             onReferenceId={setReferenceId}
-            initialText={libraryItem?.script}
-            initialAnalysis={libraryItem?.analysis}
+            initialText={initText}
+            initialReferenceId={initRefId}
           />
         </div>
         <div className="w-1/2 bg-white overflow-hidden flex flex-col">
@@ -33,7 +47,6 @@ export default function ScriptPlanningPage() {
             analysis={analysis}
             referenceText={referenceText}
             referenceId={referenceId}
-            initialTemplateData={libraryItem?.templateData}
           />
         </div>
       </div>

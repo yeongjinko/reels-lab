@@ -3,9 +3,9 @@ import {
   collection, addDoc, deleteDoc, updateDoc, doc,
   query, where, onSnapshot, serverTimestamp, getDocs,
 } from 'firebase/firestore';
+import { useNavigate } from 'react-router-dom';
 import { db } from '../../firebase/config';
 import { useApp } from '../../App';
-import { analyzeReference, generateTemplate } from '../../services/anthropic';
 
 const TAG_STYLES = {
   후킹: 'bg-orange-100 text-orange-700',
@@ -31,43 +31,17 @@ const PencilIcon = () => (
 );
 
 /* ── 상세 모달 ── */
-function DetailModal({ item, onClose }) {
+function DetailModal({ item, onClose, onGoAnalyze }) {
   const [editingField, setEditingField] = useState(null);
   const [editValue, setEditValue] = useState('');
   const [saving, setSaving] = useState(false);
-  const [analyzing, setAnalyzing] = useState(false);
   const [scriptResetBanner, setScriptResetBanner] = useState(false);
   const [localItem, setLocalItem] = useState(item);
 
   useEffect(() => { setLocalItem(item); }, [item]);
 
-  async function handleReanalyze() {
-    setAnalyzing(true);
-    setScriptResetBanner(false);
-    try {
-      const [analyzeResult, templateResult] = await Promise.all([
-        analyzeReference(localItem.script),
-        generateTemplate(localItem.script),
-      ]);
-      const analysisData = analyzeResult.data;
-      const updates = {
-        analyzed: true,
-        analysis: {
-          hookFormula: analysisData.hookFormula,
-          hookFormulaDesc: analysisData.hookFormulaDesc,
-          sentences: analysisData.sentences || [],
-        },
-        hookType: templateResult.hookType || analysisData.hookFormulaType || null,
-        empathyPoint: templateResult.empathyPoint || null,
-        empathyTags: templateResult.empathyTags || [],
-      };
-      await updateDoc(doc(db, 'referenceLibrary', localItem.id), updates);
-      setLocalItem(prev => ({ ...prev, ...updates }));
-    } catch (e) {
-      console.error('reanalyze failed:', e);
-    } finally {
-      setAnalyzing(false);
-    }
+  function handleGoAnalyze() {
+    onGoAnalyze(localItem);
   }
 
   function startEdit(field) {
@@ -221,7 +195,7 @@ function DetailModal({ item, onClose }) {
             <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 flex items-center justify-between gap-3">
               <p className="text-xs text-amber-800">대본이 수정되었어요. 다시 분석하시겠어요?</p>
               <button
-                onClick={handleReanalyze}
+                onClick={handleGoAnalyze}
                 className="text-xs font-semibold text-amber-700 hover:text-amber-900 whitespace-nowrap transition-colors"
               >
                 분석하기 →
@@ -332,16 +306,10 @@ function DetailModal({ item, onClose }) {
         {/* 하단 버튼 */}
         <div className="px-6 py-4 border-t border-gray-100 flex-shrink-0 flex gap-2">
           <button
-            onClick={handleReanalyze}
-            disabled={analyzing}
-            className="flex-1 flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-400 text-white font-semibold py-2.5 rounded-xl transition-colors text-sm"
+            onClick={handleGoAnalyze}
+            className="flex-1 flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-2.5 rounded-xl transition-colors text-sm"
           >
-            {analyzing ? (
-              <>
-                <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                분석 중...
-              </>
-            ) : localItem.analyzed ? (
+            {localItem.analyzed ? (
               <>
                 <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
@@ -484,12 +452,21 @@ function FolderSidebar({ folders, items, selectedFolderId, onSelect, onCreateFol
 /* ── 메인 페이지 ── */
 export default function LibraryPage() {
   const { user } = useApp();
+  const navigate = useNavigate();
 
   const [items, setItems] = useState([]);
   const [itemsLoading, setItemsLoading] = useState(false);
   const [folders, setFolders] = useState([]);
   const [selectedFolderId, setSelectedFolderId] = useState(null);
   const [detailItem, setDetailItem] = useState(null);
+
+  function handleGoAnalyze(item) {
+    sessionStorage.setItem('pendingLibraryItem', JSON.stringify({
+      referenceText: item.script,
+      referenceId: item.id,
+    }));
+    navigate('/');
+  }
 
   const [showForm, setShowForm] = useState(false);
   const [formTitle, setFormTitle] = useState('');
@@ -728,6 +705,7 @@ export default function LibraryPage() {
         <DetailModal
           item={detailItem}
           onClose={() => setDetailItem(null)}
+          onGoAnalyze={handleGoAnalyze}
         />
       )}
 

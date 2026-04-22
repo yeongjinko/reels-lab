@@ -10,7 +10,7 @@ admin.initializeApp();
 
 const anthropicApiKey = defineSecret('ANTHROPIC_API_KEY');
 
-const MODEL = 'claude-sonnet-4-20250514';
+const MODEL = 'claude-sonnet-4-6';
 
 const ANALYSIS_PROMPT = `너는 의류 쇼핑몰 및 숏폼 콘텐츠 릴스 스크립트 분석 전문가야.
 아래 분석 예시들과 후킹 공식 유형들을 완전히 학습해서 동일한 수준과 방식으로 분석해줘.
