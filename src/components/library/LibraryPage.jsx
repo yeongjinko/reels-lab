@@ -1,58 +1,215 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
-  collection, addDoc, deleteDoc, doc,
-  query, where, onSnapshot, serverTimestamp,
+  collection, addDoc, deleteDoc, updateDoc, doc,
+  query, where, onSnapshot, serverTimestamp, getDocs,
 } from 'firebase/firestore';
 import { useNavigate } from 'react-router-dom';
 import { db } from '../../firebase/config';
 import { useApp } from '../../App';
 
+function FolderSidebar({ folders, items, selectedFolderId, onSelect, onCreateFolder, onRenameFolder, onDeleteFolder }) {
+  const [showInput, setShowInput] = useState(false);
+  const [newName, setNewName] = useState('');
+  const [editingId, setEditingId] = useState(null);
+  const [editingName, setEditingName] = useState('');
+
+  function countInFolder(folderId) {
+    if (folderId === null) return items.length;
+    if (folderId === 'uncat') return items.filter(i => !i.folderId).length;
+    return items.filter(i => i.folderId === folderId).length;
+  }
+
+  async function submitCreate() {
+    if (!newName.trim()) { setShowInput(false); return; }
+    await onCreateFolder(newName.trim());
+    setNewName('');
+    setShowInput(false);
+  }
+
+  async function submitRename(id) {
+    if (!editingName.trim()) { setEditingId(null); return; }
+    await onRenameFolder(id, editingName.trim());
+    setEditingId(null);
+  }
+
+  const btnBase = 'w-full flex items-center justify-between px-3 py-2 rounded-lg text-sm transition-colors text-left';
+  const active = 'bg-indigo-50 text-indigo-700 font-semibold';
+  const inactive = 'text-gray-600 hover:bg-gray-100';
+
+  return (
+    <div className="w-48 flex-shrink-0 border-r border-gray-200 bg-gray-50 flex flex-col overflow-y-auto">
+      <div className="p-2 flex flex-col gap-0.5">
+        {/* 전체보기 */}
+        <button onClick={() => onSelect(null)} className={`${btnBase} ${selectedFolderId === null ? active : inactive}`}>
+          <span>전체보기</span>
+          <span className="text-xs bg-gray-200 text-gray-600 px-1.5 py-0.5 rounded-full">{countInFolder(null)}</span>
+        </button>
+        {/* 미분류 */}
+        <button onClick={() => onSelect('uncat')} className={`${btnBase} ${selectedFolderId === 'uncat' ? active : inactive}`}>
+          <span>미분류</span>
+          <span className="text-xs bg-gray-200 text-gray-600 px-1.5 py-0.5 rounded-full">{countInFolder('uncat')}</span>
+        </button>
+
+        {folders.length > 0 && <div className="border-t border-gray-200 my-1" />}
+
+        {/* 사용자 폴더 */}
+        {folders.map(folder => (
+          <div key={folder.id} className="group relative">
+            {editingId === folder.id ? (
+              <input
+                value={editingName}
+                onChange={e => setEditingName(e.target.value)}
+                onBlur={() => submitRename(folder.id)}
+                onKeyDown={e => {
+                  if (e.key === 'Enter') submitRename(folder.id);
+                  if (e.key === 'Escape') setEditingId(null);
+                }}
+                autoFocus
+                className="w-full px-3 py-1.5 text-sm border border-indigo-400 rounded-lg outline-none bg-white"
+              />
+            ) : (
+              <button
+                onClick={() => onSelect(folder.id)}
+                onDoubleClick={() => { setEditingId(folder.id); setEditingName(folder.name); }}
+                className={`${btnBase} ${selectedFolderId === folder.id ? active : inactive} pr-1`}
+              >
+                <span className="truncate flex-1 text-left">{folder.name}</span>
+                <div className="flex items-center gap-1 flex-shrink-0">
+                  <span className="text-xs bg-gray-200 text-gray-600 px-1.5 py-0.5 rounded-full">
+                    {countInFolder(folder.id)}
+                  </span>
+                  <button
+                    onClick={e => { e.stopPropagation(); onDeleteFolder(folder.id); }}
+                    className="opacity-0 group-hover:opacity-100 text-gray-400 hover:text-red-400 transition-all w-5 h-5 flex items-center justify-center rounded"
+                  >
+                    <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
+                </div>
+              </button>
+            )}
+          </div>
+        ))}
+
+        {/* 새 폴더 */}
+        <div className="mt-1">
+          {showInput ? (
+            <input
+              value={newName}
+              onChange={e => setNewName(e.target.value)}
+              onBlur={submitCreate}
+              onKeyDown={e => {
+                if (e.key === 'Enter') submitCreate();
+                if (e.key === 'Escape') { setShowInput(false); setNewName(''); }
+              }}
+              placeholder="폴더 이름"
+              autoFocus
+              className="w-full px-3 py-1.5 text-sm border border-indigo-400 rounded-lg outline-none bg-white"
+            />
+          ) : (
+            <button
+              onClick={() => setShowInput(true)}
+              className="w-full flex items-center gap-1.5 px-3 py-2 text-xs text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors"
+            >
+              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+              </svg>
+              새 폴더
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function LibraryPage() {
   const { user } = useApp();
   const navigate = useNavigate();
+
   const [items, setItems] = useState([]);
-  const [loading, setLoading] = useState(false);
+  const [itemsLoading, setItemsLoading] = useState(false);
+  const [folders, setFolders] = useState([]);
+  const [selectedFolderId, setSelectedFolderId] = useState(null);
+
   const [showForm, setShowForm] = useState(false);
   const [formLink, setFormLink] = useState('');
   const [formScript, setFormScript] = useState('');
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(null);
+  const [movingItemId, setMovingItemId] = useState(null);
 
+  // Load items
   useEffect(() => {
-    if (!user) {
-      console.log('[LibraryPage] user is null, skipping query');
-      setLoading(false);
-      return;
-    }
-    console.log('[LibraryPage] starting Firestore query for uid:', user.uid);
-    setLoading(true);
-    // orderBy 제거 → 복합 인덱스 불필요, 클라이언트에서 정렬
-    const q = query(
-      collection(db, 'referenceLibrary'),
-      where('userId', '==', user.uid)
-    );
-    const unsub = onSnapshot(
-      q,
+    if (!user) { setItemsLoading(false); return; }
+    console.log('[LibraryPage] loading items for uid:', user.uid);
+    setItemsLoading(true);
+    const q = query(collection(db, 'referenceLibrary'), where('userId', '==', user.uid));
+    return onSnapshot(q,
       (snap) => {
-        console.log('[LibraryPage] snapshot received, docs:', snap.docs.length);
-        const sorted = snap.docs
-          .map((d) => ({ id: d.id, ...d.data() }))
-          .sort((a, b) => (b.createdAt?.seconds ?? 0) - (a.createdAt?.seconds ?? 0));
-        setItems(sorted);
-        setLoading(false);
+        console.log('[LibraryPage] items snapshot:', snap.docs.length);
+        setItems(snap.docs
+          .map(d => ({ id: d.id, ...d.data() }))
+          .sort((a, b) => (b.createdAt?.seconds ?? 0) - (a.createdAt?.seconds ?? 0)));
+        setItemsLoading(false);
       },
-      (err) => {
-        console.error('[LibraryPage] snapshot error:', err);
-        setLoading(false);
-      }
+      (err) => { console.error('[LibraryPage] items error:', err); setItemsLoading(false); }
     );
-    return unsub;
   }, [user]);
+
+  // Load folders
+  useEffect(() => {
+    if (!user) return;
+    const q = query(collection(db, 'referenceFolders'), where('userId', '==', user.uid));
+    return onSnapshot(q,
+      (snap) => {
+        setFolders(snap.docs
+          .map(d => ({ id: d.id, ...d.data() }))
+          .sort((a, b) => (a.createdAt?.seconds ?? 0) - (b.createdAt?.seconds ?? 0)));
+      },
+      (err) => console.error('[LibraryPage] folders error:', err)
+    );
+  }, [user]);
+
+  const filteredItems = useMemo(() => {
+    if (selectedFolderId === null) return items;
+    if (selectedFolderId === 'uncat') return items.filter(i => !i.folderId);
+    return items.filter(i => i.folderId === selectedFolderId);
+  }, [items, selectedFolderId]);
+
+  async function handleCreateFolder(name) {
+    if (!user) return;
+    await addDoc(collection(db, 'referenceFolders'), {
+      userId: user.uid,
+      name,
+      createdAt: serverTimestamp(),
+    });
+  }
+
+  async function handleRenameFolder(id, name) {
+    await updateDoc(doc(db, 'referenceFolders', id), { name });
+  }
+
+  async function handleDeleteFolder(id) {
+    if (!confirm('폴더를 삭제할까요? 안의 카드는 미분류로 이동합니다.')) return;
+    const q = query(collection(db, 'referenceLibrary'), where('folderId', '==', id));
+    const snap = await getDocs(q);
+    await Promise.all(snap.docs.map(d => updateDoc(doc(db, 'referenceLibrary', d.id), { folderId: null })));
+    await deleteDoc(doc(db, 'referenceFolders', id));
+    if (selectedFolderId === id) setSelectedFolderId(null);
+  }
+
+  async function handleMoveItem(itemId, folderId) {
+    await updateDoc(doc(db, 'referenceLibrary', itemId), { folderId: folderId || null });
+    setMovingItemId(null);
+  }
 
   async function handleAdd() {
     if (!formScript.trim() || !user) return;
     setSaving(true);
     try {
+      const folderId = (selectedFolderId && selectedFolderId !== 'uncat') ? selectedFolderId : null;
       await addDoc(collection(db, 'referenceLibrary'), {
         userId: user.uid,
         createdAt: serverTimestamp(),
@@ -64,6 +221,7 @@ export default function LibraryPage() {
         empathyTags: [],
         empathyPoint: null,
         analysis: null,
+        folderId,
       });
       setFormLink('');
       setFormScript('');
@@ -79,11 +237,8 @@ export default function LibraryPage() {
     e.stopPropagation();
     if (!confirm('이 레퍼런스를 삭제할까요?')) return;
     setDeleting(id);
-    try {
-      await deleteDoc(doc(db, 'referenceLibrary', id));
-    } finally {
-      setDeleting(null);
-    }
+    try { await deleteDoc(doc(db, 'referenceLibrary', id)); }
+    finally { setDeleting(null); }
   }
 
   function handleAnalyze(item) {
@@ -100,6 +255,7 @@ export default function LibraryPage() {
 
   return (
     <div className="h-full flex flex-col">
+      {/* Header */}
       <div className="px-6 py-4 border-b border-gray-200 bg-white flex-shrink-0 flex items-center justify-between">
         <div>
           <h1 className="text-lg font-bold text-gray-900">레퍼런스 라이브러리</h1>
@@ -116,10 +272,150 @@ export default function LibraryPage() {
         </button>
       </div>
 
-      {/* 추가 폼 */}
+      <div className="flex flex-1 overflow-hidden">
+        {/* Folder Sidebar */}
+        <FolderSidebar
+          folders={folders}
+          items={items}
+          selectedFolderId={selectedFolderId}
+          onSelect={setSelectedFolderId}
+          onCreateFolder={handleCreateFolder}
+          onRenameFolder={handleRenameFolder}
+          onDeleteFolder={handleDeleteFolder}
+        />
+
+        {/* Card Grid */}
+        <div className="flex-1 overflow-y-auto p-6">
+          {itemsLoading ? (
+            <div className="flex items-center justify-center h-48 gap-2">
+              <div className="w-5 h-5 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
+              <p className="text-sm text-gray-400">불러오는 중...</p>
+            </div>
+          ) : filteredItems.length === 0 ? (
+            <div className="flex flex-col items-center justify-center h-64 text-center">
+              <div className="w-14 h-14 bg-indigo-50 rounded-2xl flex items-center justify-center mb-4">
+                <svg className="w-7 h-7 text-indigo-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
+                </svg>
+              </div>
+              <p className="text-gray-600 font-medium">
+                {selectedFolderId === null ? '아직 저장된 레퍼런스가 없어요' : '이 폴더에 레퍼런스가 없어요'}
+              </p>
+              <p className="text-sm text-gray-400 mt-1">
+                {selectedFolderId === null ? '"새 레퍼런스 추가" 버튼으로 시작해보세요' : '레퍼런스를 추가하거나 폴더로 이동해보세요'}
+              </p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+              {filteredItems.map(item => (
+                <div key={item.id} className="bg-white border border-gray-200 rounded-2xl p-4 flex flex-col gap-3 hover:shadow-md transition-shadow group relative">
+
+                  {/* 상태 + 액션 */}
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full ${item.analyzed ? 'bg-emerald-100 text-emerald-700' : 'bg-gray-100 text-gray-500'}`}>
+                      {item.analyzed ? '분석완료' : '미분석'}
+                    </span>
+                    {item.analyzed && item.hookType && (
+                      <span className="text-[11px] bg-indigo-100 text-indigo-600 font-semibold px-2 py-0.5 rounded-full truncate max-w-[100px]">
+                        {item.hookType}
+                      </span>
+                    )}
+                    <div className="ml-auto flex items-center gap-1.5 flex-shrink-0">
+                      {item.link && (
+                        <a href={item.link} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()} className="text-gray-400 hover:text-indigo-500 transition-colors" title="원본 링크">
+                          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+                          </svg>
+                        </a>
+                      )}
+                      {/* 폴더 이동 */}
+                      <div className="relative">
+                        <button
+                          onClick={e => { e.stopPropagation(); setMovingItemId(movingItemId === item.id ? null : item.id); }}
+                          className="text-gray-400 hover:text-indigo-500 transition-colors opacity-0 group-hover:opacity-100"
+                          title="폴더 이동"
+                        >
+                          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V7z" />
+                          </svg>
+                        </button>
+                        {movingItemId === item.id && (
+                          <div className="absolute right-0 top-6 z-20 bg-white border border-gray-200 rounded-xl shadow-lg py-1 min-w-[140px]">
+                            <button
+                              onClick={() => handleMoveItem(item.id, null)}
+                              className="w-full text-left px-3 py-2 text-xs hover:bg-gray-50 text-gray-600"
+                            >
+                              미분류
+                            </button>
+                            {folders.map(f => (
+                              <button
+                                key={f.id}
+                                onClick={() => handleMoveItem(item.id, f.id)}
+                                className={`w-full text-left px-3 py-2 text-xs hover:bg-gray-50 ${item.folderId === f.id ? 'text-indigo-600 font-semibold' : 'text-gray-600'}`}
+                              >
+                                {f.name}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                      <button
+                        onClick={e => handleDelete(e, item.id)}
+                        disabled={deleting === item.id}
+                        className="text-gray-300 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-all"
+                      >
+                        {deleting === item.id
+                          ? <div className="w-3.5 h-3.5 border-2 border-gray-400 border-t-transparent rounded-full animate-spin" />
+                          : <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                        }
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* 미리보기 */}
+                  <p className="text-sm text-gray-700 leading-relaxed line-clamp-3 flex-1">
+                    {item.preview || item.script?.slice(0, 80)}
+                  </p>
+
+                  {/* 태그 */}
+                  {item.analyzed && item.empathyTags?.length > 0 && (
+                    <div className="flex flex-wrap gap-1">
+                      {item.empathyTags.slice(0, 3).map((tag, i) => (
+                        <span key={i} className="text-[10px] bg-orange-50 text-orange-600 px-1.5 py-0.5 rounded-full">#{tag}</span>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* 분석 버튼 */}
+                  <button
+                    onClick={() => handleAnalyze(item)}
+                    className={`w-full flex items-center justify-center gap-1.5 text-xs font-semibold py-2 rounded-xl transition-colors ${
+                      item.analyzed
+                        ? 'bg-gray-50 text-gray-500 hover:bg-indigo-50 hover:text-indigo-600 border border-gray-200 hover:border-indigo-200'
+                        : 'bg-indigo-600 hover:bg-indigo-700 text-white'
+                    }`}
+                  >
+                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+                    </svg>
+                    {item.analyzed ? '스크립트 기획하기' : '분석하기'}
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* 폴더 이동 드롭다운 백드롭 */}
+      {movingItemId && (
+        <div className="fixed inset-0 z-10" onClick={() => setMovingItemId(null)} />
+      )}
+
+      {/* 새 레퍼런스 추가 모달 */}
       {showForm && (
         <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => setShowForm(false)}>
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg" onClick={(e) => e.stopPropagation()}>
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg" onClick={e => e.stopPropagation()}>
             <div className="px-6 pt-6 pb-4 border-b border-gray-100 flex items-center justify-between">
               <h3 className="text-sm font-bold text-gray-900">새 레퍼런스 추가</h3>
               <button onClick={() => setShowForm(false)} className="text-gray-400 hover:text-gray-600 transition-colors">
@@ -136,7 +432,7 @@ export default function LibraryPage() {
                 <input
                   type="url"
                   value={formLink}
-                  onChange={(e) => setFormLink(e.target.value)}
+                  onChange={e => setFormLink(e.target.value)}
                   placeholder="https://www.instagram.com/reel/..."
                   className="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
                 />
@@ -147,13 +443,18 @@ export default function LibraryPage() {
                 </label>
                 <textarea
                   value={formScript}
-                  onChange={(e) => setFormScript(e.target.value)}
+                  onChange={e => setFormScript(e.target.value)}
                   placeholder="레퍼런스 대본을 붙여넣으세요..."
                   rows={6}
-                  className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent bg-gray-50 placeholder-gray-400 resize-none"
                   autoFocus
+                  className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent bg-gray-50 placeholder-gray-400 resize-none"
                 />
               </div>
+              {(selectedFolderId && selectedFolderId !== 'uncat') && (
+                <p className="text-xs text-indigo-600 bg-indigo-50 rounded-lg px-3 py-2">
+                  현재 선택된 폴더 <strong>"{folders.find(f => f.id === selectedFolderId)?.name}"</strong>에 저장됩니다
+                </p>
+              )}
             </div>
             <div className="px-6 pb-6 flex gap-2">
               <button
@@ -171,108 +472,6 @@ export default function LibraryPage() {
           </div>
         </div>
       )}
-
-      {/* 카드 목록 */}
-      <div className="flex-1 overflow-y-auto p-6">
-        {loading ? (
-          <div className="flex items-center justify-center h-48 gap-2">
-            <div className="w-5 h-5 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
-            <p className="text-sm text-gray-400">불러오는 중...</p>
-          </div>
-        ) : items.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-64 text-center">
-            <div className="w-14 h-14 bg-indigo-50 rounded-2xl flex items-center justify-center mb-4">
-              <svg className="w-7 h-7 text-indigo-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
-              </svg>
-            </div>
-            <p className="text-gray-600 font-medium">아직 저장된 레퍼런스가 없어요</p>
-            <p className="text-sm text-gray-400 mt-1">위의 "새 레퍼런스 추가" 버튼으로 시작해보세요</p>
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            {items.map((item) => (
-              <div key={item.id} className="bg-white border border-gray-200 rounded-2xl p-4 flex flex-col gap-3 hover:shadow-md transition-shadow group">
-
-                {/* 상단: 상태 + 링크 + 삭제 */}
-                <div className="flex items-center gap-2">
-                  <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full ${
-                    item.analyzed ? 'bg-emerald-100 text-emerald-700' : 'bg-gray-100 text-gray-500'
-                  }`}>
-                    {item.analyzed ? '분석완료' : '미분석'}
-                  </span>
-                  {item.analyzed && item.hookType && (
-                    <span className="text-[11px] bg-indigo-100 text-indigo-600 font-semibold px-2 py-0.5 rounded-full truncate max-w-[120px]">
-                      {item.hookType}
-                    </span>
-                  )}
-                  <div className="ml-auto flex items-center gap-2 flex-shrink-0">
-                    {item.link && (
-                      <a
-                        href={item.link}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        onClick={(e) => e.stopPropagation()}
-                        className="text-gray-400 hover:text-indigo-500 transition-colors"
-                        title="원본 링크"
-                      >
-                        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
-                        </svg>
-                      </a>
-                    )}
-                    <button
-                      onClick={(e) => handleDelete(e, item.id)}
-                      disabled={deleting === item.id}
-                      className="text-gray-300 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-all"
-                      title="삭제"
-                    >
-                      {deleting === item.id ? (
-                        <div className="w-3.5 h-3.5 border-2 border-gray-400 border-t-transparent rounded-full animate-spin" />
-                      ) : (
-                        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                        </svg>
-                      )}
-                    </button>
-                  </div>
-                </div>
-
-                {/* 대본 미리보기 */}
-                <p className="text-sm text-gray-700 leading-relaxed line-clamp-3 flex-1">
-                  {item.preview || item.script?.slice(0, 80)}
-                </p>
-
-                {/* 분석완료 태그 */}
-                {item.analyzed && item.empathyTags?.length > 0 && (
-                  <div className="flex flex-wrap gap-1">
-                    {item.empathyTags.slice(0, 3).map((tag, i) => (
-                      <span key={i} className="text-[10px] bg-orange-50 text-orange-600 px-1.5 py-0.5 rounded-full">
-                        #{tag}
-                      </span>
-                    ))}
-                  </div>
-                )}
-
-                {/* 분석하기 버튼 */}
-                <button
-                  onClick={() => handleAnalyze(item)}
-                  className={`w-full flex items-center justify-center gap-1.5 text-xs font-semibold py-2 rounded-xl transition-colors ${
-                    item.analyzed
-                      ? 'bg-gray-50 text-gray-500 hover:bg-indigo-50 hover:text-indigo-600 border border-gray-200 hover:border-indigo-200'
-                      : 'bg-indigo-600 hover:bg-indigo-700 text-white'
-                  }`}
-                >
-                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
-                  </svg>
-                  {item.analyzed ? '스크립트 기획하기' : '분석하기'}
-                </button>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
     </div>
   );
 }
