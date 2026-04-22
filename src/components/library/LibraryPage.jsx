@@ -25,10 +25,17 @@ export default function LibraryPage() {
       where('userId', '==', user.uid),
       orderBy('createdAt', 'desc')
     );
-    return onSnapshot(q, (snap) => {
-      setItems(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
-      setLoading(false);
-    });
+    return onSnapshot(
+      q,
+      (snap) => {
+        setItems(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+        setLoading(false);
+      },
+      (err) => {
+        console.error('referenceLibrary snapshot error:', err);
+        setLoading(false);
+      }
+    );
   }, [user]);
 
   async function handleAdd() {

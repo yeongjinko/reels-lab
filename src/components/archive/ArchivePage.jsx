@@ -17,10 +17,17 @@ export default function ArchivePage() {
       where('userId', '==', user.uid),
       orderBy('createdAt', 'desc')
     );
-    return onSnapshot(q, (snap) => {
-      setScripts(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
-      setLoading(false);
-    });
+    return onSnapshot(
+      q,
+      (snap) => {
+        setScripts(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+        setLoading(false);
+      },
+      (err) => {
+        console.error('myScripts snapshot error:', err);
+        setLoading(false);
+      }
+    );
   }, [user]);
 
   async function handleDelete(e, id) {
