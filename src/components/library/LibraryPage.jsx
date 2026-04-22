@@ -3,9 +3,9 @@ import {
   collection, addDoc, deleteDoc, updateDoc, doc,
   query, where, onSnapshot, serverTimestamp, getDocs,
 } from 'firebase/firestore';
-import { useNavigate } from 'react-router-dom';
 import { db } from '../../firebase/config';
 import { useApp } from '../../App';
+import { analyzeReference, generateTemplate } from '../../services/anthropic';
 
 const TAG_STYLES = {
   후킹: 'bg-orange-100 text-orange-700',
@@ -31,14 +31,44 @@ const PencilIcon = () => (
 );
 
 /* ── 상세 모달 ── */
-function DetailModal({ item, onClose, onAnalyze }) {
+function DetailModal({ item, onClose }) {
   const [editingField, setEditingField] = useState(null);
   const [editValue, setEditValue] = useState('');
   const [saving, setSaving] = useState(false);
+  const [analyzing, setAnalyzing] = useState(false);
   const [scriptResetBanner, setScriptResetBanner] = useState(false);
   const [localItem, setLocalItem] = useState(item);
 
   useEffect(() => { setLocalItem(item); }, [item]);
+
+  async function handleReanalyze() {
+    setAnalyzing(true);
+    setScriptResetBanner(false);
+    try {
+      const [analyzeResult, templateResult] = await Promise.all([
+        analyzeReference(localItem.script),
+        generateTemplate(localItem.script),
+      ]);
+      const analysisData = analyzeResult.data;
+      const updates = {
+        analyzed: true,
+        analysis: {
+          hookFormula: analysisData.hookFormula,
+          hookFormulaDesc: analysisData.hookFormulaDesc,
+          sentences: analysisData.sentences || [],
+        },
+        hookType: templateResult.hookType || analysisData.hookFormulaType || null,
+        empathyPoint: templateResult.empathyPoint || null,
+        empathyTags: templateResult.empathyTags || [],
+      };
+      await updateDoc(doc(db, 'referenceLibrary', localItem.id), updates);
+      setLocalItem(prev => ({ ...prev, ...updates }));
+    } catch (e) {
+      console.error('reanalyze failed:', e);
+    } finally {
+      setAnalyzing(false);
+    }
+  }
 
   function startEdit(field) {
     setEditingField(field);
@@ -191,7 +221,7 @@ function DetailModal({ item, onClose, onAnalyze }) {
             <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 flex items-center justify-between gap-3">
               <p className="text-xs text-amber-800">대본이 수정되었어요. 다시 분석하시겠어요?</p>
               <button
-                onClick={() => { setScriptResetBanner(false); onAnalyze(localItem); }}
+                onClick={handleReanalyze}
                 className="text-xs font-semibold text-amber-700 hover:text-amber-900 whitespace-nowrap transition-colors"
               >
                 분석하기 →
@@ -302,13 +332,30 @@ function DetailModal({ item, onClose, onAnalyze }) {
         {/* 하단 버튼 */}
         <div className="px-6 py-4 border-t border-gray-100 flex-shrink-0 flex gap-2">
           <button
-            onClick={() => onAnalyze(localItem)}
-            className="flex-1 flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-2.5 rounded-xl transition-colors text-sm"
+            onClick={handleReanalyze}
+            disabled={analyzing}
+            className="flex-1 flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-400 text-white font-semibold py-2.5 rounded-xl transition-colors text-sm"
           >
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
-            </svg>
-            {localItem.analyzed ? '이 레퍼런스로 스크립트 기획하기' : '분석하러 가기'}
+            {analyzing ? (
+              <>
+                <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                분석 중...
+              </>
+            ) : localItem.analyzed ? (
+              <>
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                </svg>
+                다시 분석하기
+              </>
+            ) : (
+              <>
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+                </svg>
+                분석하기
+              </>
+            )}
           </button>
           <button
             onClick={onClose}
@@ -437,7 +484,6 @@ function FolderSidebar({ folders, items, selectedFolderId, onSelect, onCreateFol
 /* ── 메인 페이지 ── */
 export default function LibraryPage() {
   const { user } = useApp();
-  const navigate = useNavigate();
 
   const [items, setItems] = useState([]);
   const [itemsLoading, setItemsLoading] = useState(false);
@@ -551,19 +597,6 @@ export default function LibraryPage() {
     setDeleting(id);
     try { await deleteDoc(doc(db, 'referenceLibrary', id)); }
     finally { setDeleting(null); }
-  }
-
-  function handleAnalyze(item) {
-    setDetailItem(null);
-    navigate('/', {
-      state: {
-        libraryItem: {
-          id: item.id,
-          script: item.script,
-          analysis: item.analyzed ? item.analysis : null,
-        },
-      },
-    });
   }
 
   return (
@@ -695,7 +728,6 @@ export default function LibraryPage() {
         <DetailModal
           item={detailItem}
           onClose={() => setDetailItem(null)}
-          onAnalyze={handleAnalyze}
         />
       )}
 
