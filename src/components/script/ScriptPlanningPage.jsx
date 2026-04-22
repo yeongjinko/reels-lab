@@ -1,10 +1,14 @@
 import React, { useState } from 'react';
+import { useLocation } from 'react-router-dom';
 import ReferencePanel from './ReferencePanel';
 import ScriptPanel from './ScriptPanel';
 
 export default function ScriptPlanningPage() {
-  const [analysis, setAnalysis] = useState(null);
-  const [referenceText, setReferenceText] = useState('');
+  const location = useLocation();
+  const libraryItem = location.state?.libraryItem;
+
+  const [analysis, setAnalysis] = useState(libraryItem?.analysis || null);
+  const [referenceText, setReferenceText] = useState(libraryItem?.script || '');
 
   return (
     <div className="h-full flex flex-col">
@@ -18,10 +22,16 @@ export default function ScriptPlanningPage() {
           <ReferencePanel
             onAnalysisDone={setAnalysis}
             onReferenceText={setReferenceText}
+            initialText={libraryItem?.script}
+            initialAnalysis={libraryItem?.analysis}
           />
         </div>
         <div className="w-1/2 bg-white overflow-hidden flex flex-col">
-          <ScriptPanel analysis={analysis} referenceText={referenceText} />
+          <ScriptPanel
+            analysis={analysis}
+            referenceText={referenceText}
+            initialTemplateData={libraryItem?.templateData}
+          />
         </div>
       </div>
     </div>

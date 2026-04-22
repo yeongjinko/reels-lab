@@ -9,6 +9,7 @@ import MainLayout from './components/layout/MainLayout';
 import ScriptPlanningPage from './components/script/ScriptPlanningPage';
 import ArchivePage from './components/archive/ArchivePage';
 import SettingsPage from './components/settings/SettingsPage';
+import LibraryPage from './components/library/LibraryPage';
 
 export const AppContext = createContext(null);
 export const useApp = () => useContext(AppContext);
@@ -88,6 +89,14 @@ export default function App() {
               !isLoggedIn ? <Navigate to="/login" replace /> :
               !hasOnboarded ? <Navigate to="/onboarding" replace /> :
               <MainLayout><SettingsPage /></MainLayout>
+            }
+          />
+          <Route
+            path="/library"
+            element={
+              !isLoggedIn ? <Navigate to="/login" replace /> :
+              !hasOnboarded ? <Navigate to="/onboarding" replace /> :
+              <MainLayout><LibraryPage /></MainLayout>
             }
           />
           <Route path="*" element={<Navigate to="/" replace />} />

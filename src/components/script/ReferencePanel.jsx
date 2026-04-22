@@ -319,10 +319,10 @@ function SentenceCard({ sentence, onUpdate }) {
   );
 }
 
-export default function ReferencePanel({ onAnalysisDone, onReferenceText }) {
-  const [text, setText] = useState('');
+export default function ReferencePanel({ onAnalysisDone, onReferenceText, initialText, initialAnalysis }) {
+  const [text, setText] = useState(initialText || '');
   const [loading, setLoading] = useState(false);
-  const [analysis, setAnalysis] = useState(null);
+  const [analysis, setAnalysis] = useState(initialAnalysis || null);
   const [error, setError] = useState('');
 
   // 맥락 수집 플로우
