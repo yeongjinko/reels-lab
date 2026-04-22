@@ -642,7 +642,7 @@ export default function LibraryPage() {
                         {item.analyzed ? '분석완료' : '미분석'}
                       </span>
                       {item.analyzed && item.hookType && (
-                        <span className="text-[10px] bg-indigo-100 text-indigo-600 font-semibold px-1.5 py-0.5 rounded-full truncate max-w-[80px]">
+                        <span className="text-[10px] bg-indigo-100 text-indigo-600 font-semibold px-1.5 py-0.5 rounded-full truncate max-w-full">
                           {item.hookType}
                         </span>
                       )}
