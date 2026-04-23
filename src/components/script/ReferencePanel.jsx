@@ -481,6 +481,7 @@ export default function ReferencePanel({ onAnalysisDone, onReferenceText, onRefe
           hookType,
           empathyPoint,
           empathyTags,
+          analyzedAt: serverTimestamp(),
         });
       } catch (e) {
         console.error('referenceLibrary update failed:', e);

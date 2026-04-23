@@ -581,13 +581,18 @@ exports.generateTemplate = onCall(
     const db = admin.firestore();
 
     try {
+      console.log('generateTemplate START — script length:', script.trim().length);
+      const t0 = Date.now();
       const message = await client.messages.create({
         model: MODEL,
-        max_tokens: 2048,
+        max_tokens: 4096,
         system: GENERATE_TEMPLATE_PROMPT,
         messages: [{ role: 'user', content: `대본:\n${script.trim()}` }],
       });
-      const result = parseJsonFromText(message.content[0].text);
+      const rawText = message.content[0].text;
+      console.log('generateTemplate API done —', Date.now() - t0, 'ms | stop_reason:', message.stop_reason, '| raw length:', rawText.length);
+      const result = parseJsonFromText(rawText);
+      console.log('generateTemplate SUCCESS — steps:', result?.steps?.length, '| hookType:', result?.hookType);
 
       if (result.isNewType && result.hookType) {
         const existing = await db.collection('newHookTypes')
@@ -606,7 +611,7 @@ exports.generateTemplate = onCall(
 
       return { success: true, data: result };
     } catch (e) {
-      console.error('generateTemplate error:', e);
+      console.error('generateTemplate error — type:', e?.constructor?.name, '| message:', e?.message, '| full:', JSON.stringify(e));
       if (e instanceof HttpsError) throw e;
       throw new HttpsError('internal', '템플릿 생성 중 오류가 발생했습니다.');
     }

@@ -14,6 +14,18 @@ const TAG_STYLES = {
   CTA: 'bg-red-100 text-red-700',
 };
 
+function formatAnalyzedAt(ts) {
+  if (!ts) return null;
+  const date = ts.toDate ? ts.toDate() : new Date(ts);
+  const now = new Date();
+  const diffMs = now - date;
+  const diffDays = Math.floor(diffMs / 86400000);
+  if (diffDays === 0) return '오늘 분석';
+  if (diffDays === 1) return '어제 분석';
+  if (diffDays < 7) return `${diffDays}일 전 분석`;
+  return `${date.getFullYear()}.${String(date.getMonth() + 1).padStart(2, '0')}.${String(date.getDate()).padStart(2, '0')} 분석`;
+}
+
 function getTitle(script) {
   const lines = (script || '').split('\n').filter(l => l.trim());
   return lines[0]?.slice(0, 40) || '제목 없음';
@@ -125,6 +137,9 @@ function DetailModal({ item, onClose, onGoAnalyze }) {
                   <span className="text-[11px] bg-indigo-100 text-indigo-600 font-semibold px-2 py-0.5 rounded-full">
                     {localItem.hookType}
                   </span>
+                )}
+                {localItem.analyzed && localItem.analyzedAt && (
+                  <span className="text-[11px] text-gray-400 ml-auto">{formatAnalyzedAt(localItem.analyzedAt)}</span>
                 )}
               </div>
               {/* 제목 */}
@@ -647,14 +662,19 @@ export default function LibraryPage() {
 
                   {/* 뱃지 + 액션 */}
                   <div className="flex items-center justify-between gap-1 mt-auto">
-                    <div className="flex items-center gap-1 flex-wrap min-w-0">
-                      <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full flex-shrink-0 ${item.analyzed ? 'bg-emerald-100 text-emerald-700' : 'bg-gray-100 text-gray-400'}`}>
-                        {item.analyzed ? '분석완료' : '미분석'}
-                      </span>
-                      {item.analyzed && item.hookType && (
-                        <span className="text-[10px] bg-indigo-100 text-indigo-600 font-semibold px-1.5 py-0.5 rounded-full truncate max-w-full">
-                          {item.hookType}
+                    <div className="flex flex-col gap-1 min-w-0 flex-1">
+                      <div className="flex items-center gap-1 flex-wrap">
+                        <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full flex-shrink-0 ${item.analyzed ? 'bg-emerald-100 text-emerald-700' : 'bg-gray-100 text-gray-400'}`}>
+                          {item.analyzed ? '분석완료' : '미분석'}
                         </span>
+                        {item.analyzed && item.hookType && (
+                          <span className="text-[10px] bg-indigo-100 text-indigo-600 font-semibold px-1.5 py-0.5 rounded-full truncate max-w-full">
+                            {item.hookType}
+                          </span>
+                        )}
+                      </div>
+                      {item.analyzed && item.analyzedAt && (
+                        <span className="text-[10px] text-gray-400">{formatAnalyzedAt(item.analyzedAt)}</span>
                       )}
                     </div>
                     <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
