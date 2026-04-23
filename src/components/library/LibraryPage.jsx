@@ -492,6 +492,13 @@ export default function LibraryPage() {
   const [movingItemId, setMovingItemId] = useState(null);
 
   useEffect(() => {
+    if (!movingItemId) return;
+    const close = () => setMovingItemId(null);
+    document.addEventListener('click', close);
+    return () => document.removeEventListener('click', close);
+  }, [movingItemId]);
+
+  useEffect(() => {
     if (!user) { setItemsLoading(false); return; }
     console.log('[LibraryPage] loading items for uid:', user.uid);
     setItemsLoading(true);
@@ -689,10 +696,13 @@ export default function LibraryPage() {
                           </svg>
                         </button>
                         {movingItemId === item.id && (
-                          <div className="absolute right-0 top-7 z-20 bg-white border border-gray-200 rounded-xl shadow-lg py-1 min-w-[130px]">
-                            <button onClick={e => { e.stopPropagation(); handleMoveItem(item.id, null); }} className="w-full text-left px-3 py-1.5 text-xs hover:bg-gray-50 text-gray-600">미분류</button>
+                          <div
+                            className="absolute right-0 top-7 z-20 bg-white border border-gray-200 rounded-xl shadow-lg py-1 min-w-[130px]"
+                            onClick={e => e.stopPropagation()}
+                          >
+                            <button onClick={() => handleMoveItem(item.id, null)} className="w-full text-left px-3 py-1.5 text-xs hover:bg-gray-50 text-gray-600">미분류</button>
                             {folders.map(f => (
-                              <button key={f.id} onClick={e => { e.stopPropagation(); handleMoveItem(item.id, f.id); }} className={`w-full text-left px-3 py-1.5 text-xs hover:bg-gray-50 ${item.folderId === f.id ? 'text-indigo-600 font-semibold' : 'text-gray-600'}`}>{f.name}</button>
+                              <button key={f.id} onClick={() => handleMoveItem(item.id, f.id)} className={`w-full text-left px-3 py-1.5 text-xs hover:bg-gray-50 ${item.folderId === f.id ? 'text-indigo-600 font-semibold' : 'text-gray-600'}`}>{f.name}</button>
                             ))}
                           </div>
                         )}
@@ -716,9 +726,6 @@ export default function LibraryPage() {
           )}
         </div>
       </div>
-
-      {/* 폴더 이동 백드롭 */}
-      {movingItemId && <div className="fixed inset-0 z-10" onClick={() => setMovingItemId(null)} />}
 
       {/* 상세 모달 */}
       {detailItem && (

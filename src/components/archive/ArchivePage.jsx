@@ -278,6 +278,13 @@ export default function ArchivePage() {
   const [movingScriptId, setMovingScriptId] = useState(null);
   const [detailScript, setDetailScript] = useState(null);
 
+  useEffect(() => {
+    if (!movingScriptId) return;
+    const close = () => setMovingScriptId(null);
+    document.addEventListener('click', close);
+    return () => document.removeEventListener('click', close);
+  }, [movingScriptId]);
+
   // Load scripts
   useEffect(() => {
     if (!user) { setLoading(false); return; }
@@ -428,10 +435,13 @@ export default function ArchivePage() {
                           </svg>
                         </button>
                         {movingScriptId === script.id && (
-                          <div className="absolute right-0 top-7 z-20 bg-white border border-gray-200 rounded-xl shadow-lg py-1 min-w-[130px]">
-                            <button onClick={e => { e.stopPropagation(); handleMoveScript(script.id, null); }} className="w-full text-left px-3 py-1.5 text-xs hover:bg-gray-50 text-gray-600">미분류</button>
+                          <div
+                            className="absolute right-0 top-7 z-20 bg-white border border-gray-200 rounded-xl shadow-lg py-1 min-w-[130px]"
+                            onClick={e => e.stopPropagation()}
+                          >
+                            <button onClick={() => handleMoveScript(script.id, null)} className="w-full text-left px-3 py-1.5 text-xs hover:bg-gray-50 text-gray-600">미분류</button>
                             {folders.map(f => (
-                              <button key={f.id} onClick={e => { e.stopPropagation(); handleMoveScript(script.id, f.id); }} className={`w-full text-left px-3 py-1.5 text-xs hover:bg-gray-50 ${script.folderId === f.id ? 'text-indigo-600 font-semibold' : 'text-gray-600'}`}>{f.name}</button>
+                              <button key={f.id} onClick={() => handleMoveScript(script.id, f.id)} className={`w-full text-left px-3 py-1.5 text-xs hover:bg-gray-50 ${script.folderId === f.id ? 'text-indigo-600 font-semibold' : 'text-gray-600'}`}>{f.name}</button>
                             ))}
                           </div>
                         )}
@@ -455,11 +465,6 @@ export default function ArchivePage() {
           )}
         </div>
       </div>
-
-      {/* 폴더 이동 드롭다운 백드롭 */}
-      {movingScriptId && (
-        <div className="fixed inset-0 z-10" onClick={() => setMovingScriptId(null)} />
-      )}
 
       {/* 상세 모달 */}
       {detailScript && (
