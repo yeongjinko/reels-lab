@@ -391,13 +391,42 @@ function SentenceCard({ sentence, onUpdate }) {
   );
 }
 
+const REF_DRAFT_KEY = 'rlab_ref_draft';
+const STEPS_DRAFT_KEY = 'rlab_steps_draft';
+
+function formatTime(date) {
+  if (!date) return '';
+  return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
+}
+
 export default function ReferencePanel({ onAnalysisDone, onReferenceText, onReferenceId, initialText, initialAnalysis, initialReferenceId }) {
   const { user } = useApp();
-  const [text, setText] = useState(initialText || '');
+
+  const [text, setText] = useState(() => {
+    if (initialText) return initialText;
+    try {
+      const saved = JSON.parse(localStorage.getItem(REF_DRAFT_KEY) || 'null');
+      return saved?.text || '';
+    } catch { return ''; }
+  });
   const [loading, setLoading] = useState(false);
-  const [analysis, setAnalysis] = useState(initialAnalysis || null);
+  const [analysis, setAnalysis] = useState(() => {
+    if (initialAnalysis) return initialAnalysis;
+    if (initialText) return null;
+    try {
+      const saved = JSON.parse(localStorage.getItem(REF_DRAFT_KEY) || 'null');
+      return saved?.analysis || null;
+    } catch { return null; }
+  });
   const [error, setError] = useState('');
   const [showLibraryPicker, setShowLibraryPicker] = useState(false);
+  const [savedAt, setSavedAt] = useState(() => {
+    if (initialText) return null;
+    try {
+      const saved = JSON.parse(localStorage.getItem(REF_DRAFT_KEY) || 'null');
+      return saved?.savedAt ? new Date(saved.savedAt) : null;
+    } catch { return null; }
+  });
 
   const [baseAnalysis, setBaseAnalysis] = useState(null);
   const [contextQueue, setContextQueue] = useState([]);
@@ -406,12 +435,53 @@ export default function ReferencePanel({ onAnalysisDone, onReferenceText, onRefe
   const [overallFeedback, setOverallFeedback] = useState({ open: false, text: '', loading: false, error: '' });
 
   const refDocRef = useRef(initialReferenceId || null);
+  const draftTimerRef = useRef(null);
+
+  // 초기 마운트 시 분석 결과 복원 알림
+  useEffect(() => {
+    if (!initialText && analysis) {
+      onAnalysisDone?.(analysis);
+      onReferenceText?.(text);
+    }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  function saveDraft(newText, newAnalysis, delay = 1000) {
+    clearTimeout(draftTimerRef.current);
+    draftTimerRef.current = setTimeout(() => {
+      try {
+        const now = new Date();
+        localStorage.setItem(REF_DRAFT_KEY, JSON.stringify({
+          text: newText,
+          analysis: newAnalysis,
+          savedAt: now.getTime(),
+        }));
+        setSavedAt(now);
+      } catch {}
+    }, delay);
+  }
+
+  function handleReset() {
+    clearTimeout(draftTimerRef.current);
+    localStorage.removeItem(REF_DRAFT_KEY);
+    localStorage.removeItem(STEPS_DRAFT_KEY);
+    setText('');
+    setAnalysis(null);
+    setBaseAnalysis(null);
+    setContextQueue([]);
+    setContextAnswers([]);
+    setSavedAt(null);
+    refDocRef.current = null;
+    onAnalysisDone?.(null);
+    onReferenceText?.('');
+    onReferenceId?.(null);
+  }
 
   async function handleAnalyzeClick() {
     if (!text.trim()) return;
     setLoading(true);
     setError('');
     setAnalysis(null);
+    saveDraft(text, null, 0); // 분석 시작 시 즉시 저장 (analysis 초기화)
     setBaseAnalysis(null);
     setContextQueue([]);
     setContextAnswers([]);
@@ -460,6 +530,7 @@ export default function ReferencePanel({ onAnalysisDone, onReferenceText, onRefe
     setAnalysis(analysisData);
     onAnalysisDone?.(analysisData);
     onReferenceText?.(text.trim());
+    saveDraft(text, analysisData, 0); // 분석 완료 시 즉시 저장
     setLoading(false);
 
     if (docId && user) {
@@ -585,8 +656,25 @@ export default function ReferencePanel({ onAnalysisDone, onReferenceText, onRefe
     <>
       <div className="flex flex-col h-full">
         <div className="p-5 border-b border-gray-100">
-          <h2 className="font-bold text-gray-900 mb-0.5">레퍼런스 분석</h2>
-          <p className="text-xs text-gray-500">잘 되는 릴스 대본을 붙여넣으면 AI가 후킹 공식을 추출합니다</p>
+          <div className="flex items-start justify-between gap-2">
+            <div>
+              <h2 className="font-bold text-gray-900 mb-0.5">레퍼런스 분석</h2>
+              <p className="text-xs text-gray-500">잘 되는 릴스 대본을 붙여넣으면 AI가 후킹 공식을 추출합니다</p>
+            </div>
+            <div className="flex items-center gap-2 flex-shrink-0">
+              {savedAt && (
+                <span className="text-[11px] text-gray-400">임시저장됨 {formatTime(savedAt)}</span>
+              )}
+              {(text || analysis) && (
+                <button
+                  onClick={handleReset}
+                  className="text-[11px] text-gray-400 hover:text-red-400 px-2 py-1 rounded-lg hover:bg-red-50 transition-colors"
+                >
+                  초기화
+                </button>
+              )}
+            </div>
+          </div>
         </div>
 
         <div className="flex-1 overflow-y-auto p-5">
@@ -607,7 +695,7 @@ export default function ReferencePanel({ onAnalysisDone, onReferenceText, onRefe
             </div>
             <textarea
               value={text}
-              onChange={(e) => { setText(e.target.value); refDocRef.current = null; }}
+              onChange={(e) => { setText(e.target.value); refDocRef.current = null; saveDraft(e.target.value, analysis); }}
               placeholder={"예시:\n여보세요~ 사장님들~ 이거 진짜 안 보면 후회해요.\n이번 시즌 가장 많이 팔린 아이템 TOP3 알려드릴게요.\n지금 바로 확인하세요!"}
               rows={8}
               className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent bg-gray-50 placeholder-gray-400"

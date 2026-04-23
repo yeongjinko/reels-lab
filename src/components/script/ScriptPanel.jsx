@@ -1,8 +1,20 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from '../../firebase/config';
 import { useApp } from '../../App';
 import { generateTemplate } from '../../services/anthropic';
+
+const STEPS_DRAFT_KEY = 'rlab_steps_draft';
+
+function tryRestoreStepsDraft(refText, stepsLen) {
+  try {
+    const saved = JSON.parse(localStorage.getItem(STEPS_DRAFT_KEY) || 'null');
+    if (saved?.referenceText === refText && saved?.answers?.length === stepsLen) {
+      return { answers: saved.answers, currentStep: saved.currentStep ?? 0, done: saved.done ?? false };
+    }
+  } catch {}
+  return { answers: new Array(stepsLen).fill(''), currentStep: 0, done: false };
+}
 
 function StepCard({ step, index, total, answer, onAnswerChange, onNext, onPrev }) {
   const isLast = index === total - 1;
@@ -192,20 +204,41 @@ export default function ScriptPanel({ analysis, referenceText, referenceId }) {
 
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [toast, setToast] = useState('');
+
+  const prevRefText = useRef(null);
+
+  // answers/currentStep/done 변경 시 localStorage 저장
+  useEffect(() => {
+    if (!referenceText || !templateData) return;
+    try {
+      localStorage.setItem(STEPS_DRAFT_KEY, JSON.stringify({
+        referenceText,
+        answers,
+        currentStep,
+        done,
+      }));
+    } catch {}
+  }, [answers, currentStep, done, referenceText, templateData]);
 
   useEffect(() => {
     if (!referenceText) return;
+    // referenceText가 바뀐 경우에만 generateTemplate 호출
+    if (prevRefText.current === referenceText) return;
+    prevRefText.current = referenceText;
+
     setLoading(true);
     setError('');
     setTemplateData(null);
-    setCurrentStep(0);
-    setAnswers([]);
-    setDone(false);
     setSaved(false);
     generateTemplate(referenceText)
       .then((data) => {
         setTemplateData(data);
-        setAnswers(new Array((data.steps || []).length).fill(''));
+        const stepsLen = (data.steps || []).length;
+        const restored = tryRestoreStepsDraft(referenceText, stepsLen);
+        setAnswers(restored.answers);
+        setCurrentStep(restored.currentStep);
+        setDone(restored.done);
       })
       .catch((e) => setError(e.message || '코치 생성 중 오류가 발생했습니다.'))
       .finally(() => setLoading(false));
@@ -241,6 +274,8 @@ export default function ScriptPanel({ analysis, referenceText, referenceId }) {
         referenceId: referenceId || null,
       });
       setSaved(true);
+      setToast('내 보관함에 저장됐어요');
+      setTimeout(() => setToast(''), 2500);
     } catch (e) {
       console.error('save failed:', e);
     } finally {
@@ -249,6 +284,15 @@ export default function ScriptPanel({ analysis, referenceText, referenceId }) {
   }
 
   return (
+    <>
+    {toast && (
+      <div className="fixed bottom-6 left-1/2 -translate-x-1/2 bg-gray-900 text-white text-sm font-semibold px-5 py-2.5 rounded-xl shadow-lg z-50 flex items-center gap-2">
+        <svg className="w-4 h-4 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
+        </svg>
+        {toast}
+      </div>
+    )}
     <div className="flex flex-col h-full">
       <div className="p-5 border-b border-gray-100 flex-shrink-0">
         <h2 className="font-bold text-gray-900 mb-0.5">스크립트 작성</h2>
@@ -352,5 +396,6 @@ export default function ScriptPanel({ analysis, referenceText, referenceId }) {
         ) : null}
       </div>
     </div>
+    </>
   );
 }
