@@ -329,6 +329,8 @@ exports.analyzeScript = onCall(
       throw new HttpsError('invalid-argument', '대본은 5000자 이하로 입력해주세요.');
     }
 
+    console.log('API KEY LENGTH:', anthropicApiKey.value()?.length);
+    console.log('API KEY PREFIX:', anthropicApiKey.value()?.substring(0, 10));
     const client = new Anthropic({ apiKey: anthropicApiKey.value() });
 
     try {
@@ -361,8 +363,10 @@ exports.generateContextOptions = onCall(
     const { word, sentence, fullScript } = request.data;
     if (!word || !sentence) throw new HttpsError('invalid-argument', '단어와 문장이 필요합니다.');
 
+    console.log('generateContextOptions START — word:', word, '| sentence length:', sentence?.length, '| script length:', (fullScript || '').length);
     const client = new Anthropic({ apiKey: anthropicApiKey.value() });
     try {
+      const t0 = Date.now();
       const message = await client.messages.create({
         model: MODEL,
         max_tokens: 1024,
@@ -372,10 +376,12 @@ exports.generateContextOptions = onCall(
           content: `전체 대본:\n${(fullScript || sentence).trim()}\n\n이 문장: ${sentence}\n단어: ${word}`,
         }],
       });
+      console.log('generateContextOptions API done —', Date.now() - t0, 'ms | raw:', message.content[0].text.slice(0, 200));
       const result = parseJsonFromText(message.content[0].text);
+      console.log('generateContextOptions SUCCESS — options count:', result?.options?.length);
       return { success: true, data: result };
     } catch (e) {
-      console.error('generateContextOptions error:', e);
+      console.error('generateContextOptions error — type:', e?.constructor?.name, '| message:', e?.message, '| status:', e?.status, '| full:', JSON.stringify(e));
       if (e instanceof HttpsError) throw e;
       throw new HttpsError('internal', '선택지 생성 중 오류가 발생했습니다.');
     }
