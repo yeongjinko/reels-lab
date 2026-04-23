@@ -221,40 +221,37 @@ export default function ScriptPanel({ analysis, referenceText, referenceId, init
     } catch {}
   }, [answers, currentStep, done, referenceText, templateData]);
 
+  // 기존 템플릿 데이터가 있으면 AI 호출 없이 바로 사용 (라이브러리에서 이동 시)
   useEffect(() => {
-    if (!referenceText || !analysis) return;
+    if (!referenceText || !analysis || !initialTemplateData || templateData) return;
+    setTemplateData(initialTemplateData);
+    const stepsLen = (initialTemplateData.steps || []).length;
+    const restored = tryRestoreStepsDraft(referenceText, stepsLen);
+    setAnswers(restored.answers);
+    setCurrentStep(restored.currentStep);
+    setDone(restored.done);
+  }, [referenceText, analysis]); // eslint-disable-line react-hooks/exhaustive-deps
 
-    // 기존 템플릿 데이터가 있으면 AI 호출 없이 바로 사용
-    if (initialTemplateData && !templateData) {
-      setTemplateData(initialTemplateData);
-      const stepsLen = (initialTemplateData.steps || []).length;
-      const restored = tryRestoreStepsDraft(referenceText, stepsLen);
-      setAnswers(restored.answers);
-      setCurrentStep(restored.currentStep);
-      setDone(restored.done);
-      return;
-    }
-
-    // referenceText가 바뀐 경우에만 generateTemplate 호출
-    if (prevRefText.current === referenceText && templateData) return;
-    prevRefText.current = referenceText;
-
+  async function handleGenerateTemplate() {
+    if (!referenceText || loading) return;
     setLoading(true);
     setError('');
     setTemplateData(null);
     setSaved(false);
-    generateTemplate(referenceText)
-      .then((data) => {
-        setTemplateData(data);
-        const stepsLen = (data.steps || []).length;
-        const restored = tryRestoreStepsDraft(referenceText, stepsLen);
-        setAnswers(restored.answers);
-        setCurrentStep(restored.currentStep);
-        setDone(restored.done);
-      })
-      .catch((e) => setError(e.message || '코치 생성 중 오류가 발생했습니다.'))
-      .finally(() => setLoading(false));
-  }, [referenceText, analysis]); // eslint-disable-line react-hooks/exhaustive-deps
+    try {
+      const data = await generateTemplate(referenceText);
+      setTemplateData(data);
+      const stepsLen = (data.steps || []).length;
+      const restored = tryRestoreStepsDraft(referenceText, stepsLen);
+      setAnswers(restored.answers);
+      setCurrentStep(restored.currentStep);
+      setDone(restored.done);
+    } catch (e) {
+      setError(e.message || '코치 생성 중 오류가 발생했습니다.');
+    } finally {
+      setLoading(false);
+    }
+  }
 
   const steps = templateData?.steps || [];
 
@@ -327,8 +324,37 @@ export default function ScriptPanel({ analysis, referenceText, referenceId, init
             <p className="text-xs text-gray-400">단계별 코치 생성 중...</p>
           </div>
         ) : error ? (
-          <div className="bg-red-50 border border-red-200 text-red-600 text-sm rounded-xl px-4 py-3">
-            {error}
+          <div className="flex flex-col gap-3">
+            <div className="bg-red-50 border border-red-200 text-red-600 text-sm rounded-xl px-4 py-3">
+              {error}
+            </div>
+            <button
+              onClick={handleGenerateTemplate}
+              className="flex items-center justify-center gap-2 text-sm font-semibold text-indigo-600 hover:text-indigo-700 border border-indigo-200 hover:bg-indigo-50 px-4 py-2.5 rounded-xl transition-colors"
+            >
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+              </svg>
+              다시 시도
+            </button>
+          </div>
+        ) : !templateData ? (
+          <div className="flex flex-col items-center justify-center h-56 text-center px-4">
+            <div className="w-14 h-14 bg-indigo-50 rounded-2xl flex items-center justify-center mb-4">
+              <svg className="w-7 h-7 text-indigo-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" />
+              </svg>
+            </div>
+            <p className="text-xs text-gray-400 mb-4 leading-relaxed">레퍼런스 구조를 분석해서<br />단계별 작성 가이드를 만들어드려요</p>
+            <button
+              onClick={handleGenerateTemplate}
+              className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold px-5 py-2.5 rounded-xl transition-colors text-sm"
+            >
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+              </svg>
+              코치 가이드 생성하기
+            </button>
           </div>
         ) : templateData ? (
           <div className="flex flex-col gap-5">
