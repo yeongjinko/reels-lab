@@ -479,6 +479,11 @@ export default function LibraryPage() {
     sessionStorage.setItem('pendingLibraryItem', JSON.stringify({
       referenceText: item.script,
       referenceId: item.id,
+      existingAnalysis: item.analysis || null,
+      existingHookType: item.hookType || null,
+      existingEmpathyPoint: item.empathyPoint || null,
+      existingEmpathyTags: item.empathyTags || [],
+      existingTemplate: item.templateData || null,
     }));
     navigate('/');
   }

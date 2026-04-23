@@ -192,7 +192,7 @@ function CompletionView({ answers, steps, onPrev, onSave, saving, saved }) {
   );
 }
 
-export default function ScriptPanel({ analysis, referenceText, referenceId }) {
+export default function ScriptPanel({ analysis, referenceText, referenceId, initialTemplateData }) {
   const { user } = useApp();
   const [templateData, setTemplateData] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -222,9 +222,21 @@ export default function ScriptPanel({ analysis, referenceText, referenceId }) {
   }, [answers, currentStep, done, referenceText, templateData]);
 
   useEffect(() => {
-    if (!referenceText) return;
+    if (!referenceText || !analysis) return;
+
+    // 기존 템플릿 데이터가 있으면 AI 호출 없이 바로 사용
+    if (initialTemplateData && !templateData) {
+      setTemplateData(initialTemplateData);
+      const stepsLen = (initialTemplateData.steps || []).length;
+      const restored = tryRestoreStepsDraft(referenceText, stepsLen);
+      setAnswers(restored.answers);
+      setCurrentStep(restored.currentStep);
+      setDone(restored.done);
+      return;
+    }
+
     // referenceText가 바뀐 경우에만 generateTemplate 호출
-    if (prevRefText.current === referenceText) return;
+    if (prevRefText.current === referenceText && templateData) return;
     prevRefText.current = referenceText;
 
     setLoading(true);
@@ -242,7 +254,7 @@ export default function ScriptPanel({ analysis, referenceText, referenceId }) {
       })
       .catch((e) => setError(e.message || '코치 생성 중 오류가 발생했습니다.'))
       .finally(() => setLoading(false));
-  }, [referenceText]);
+  }, [referenceText, analysis]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const steps = templateData?.steps || [];
 

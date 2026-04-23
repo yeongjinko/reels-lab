@@ -399,7 +399,7 @@ function formatTime(date) {
   return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
 }
 
-export default function ReferencePanel({ onAnalysisDone, onReferenceText, onReferenceId, initialText, initialAnalysis, initialReferenceId }) {
+export default function ReferencePanel({ onAnalysisDone, onReferenceText, onReferenceId, onReanalysisStart, initialText, initialAnalysis, initialReferenceId }) {
   const { user } = useApp();
 
   const [text, setText] = useState(() => {
@@ -427,6 +427,8 @@ export default function ReferencePanel({ onAnalysisDone, onReferenceText, onRefe
       return saved?.savedAt ? new Date(saved.savedAt) : null;
     } catch { return null; }
   });
+
+  const [isFromLibrary, setIsFromLibrary] = useState(!!initialAnalysis);
 
   const [baseAnalysis, setBaseAnalysis] = useState(null);
   const [contextQueue, setContextQueue] = useState([]);
@@ -478,6 +480,10 @@ export default function ReferencePanel({ onAnalysisDone, onReferenceText, onRefe
 
   async function handleAnalyzeClick() {
     if (!text.trim()) return;
+    if (isFromLibrary) {
+      setIsFromLibrary(false);
+      onReanalysisStart?.();
+    }
     setLoading(true);
     setError('');
     setAnalysis(null);
@@ -552,6 +558,7 @@ export default function ReferencePanel({ onAnalysisDone, onReferenceText, onRefe
           hookType,
           empathyPoint,
           empathyTags,
+          templateData: templateResult || null,
           analyzedAt: serverTimestamp(),
         });
       } catch (e) {
@@ -712,6 +719,13 @@ export default function ReferencePanel({ onAnalysisDone, onReferenceText, onRefe
                 <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
                 분석 중...
               </>
+            ) : isFromLibrary ? (
+              <>
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                </svg>
+                다시 분석하기
+              </>
             ) : (
               <>
                 <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -730,6 +744,14 @@ export default function ReferencePanel({ onAnalysisDone, onReferenceText, onRefe
 
           {analysis && (
             <div className="flex flex-col gap-4">
+              {isFromLibrary && (
+                <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 flex items-center gap-2">
+                  <svg className="w-4 h-4 text-amber-500 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                  <p className="text-xs text-amber-800">기존 분석 결과입니다. 다시 분석하려면 위 버튼을 클릭하세요.</p>
+                </div>
+              )}
               <div className="bg-indigo-50 border border-indigo-200 rounded-xl p-4">
                 <div className="flex items-center gap-2 mb-2">
                   <svg className="w-4 h-4 text-indigo-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
