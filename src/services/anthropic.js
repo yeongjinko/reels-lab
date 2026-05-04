@@ -10,6 +10,7 @@ const refineAnalysisFn = httpsCallable(functions, 'refineAnalysis');
 const generateContextOptionsFn = httpsCallable(functions, 'generateContextOptions');
 const updateSentencesWithContextFn = httpsCallable(functions, 'updateSentencesWithContext');
 const generateTemplateFn = httpsCallable(functions, 'generateTemplate');
+const generateFinalScriptFn = httpsCallable(functions, 'generateFinalScript');
 
 export async function analyzeReference(text) {
   const result = await analyzeScriptFn({ text });
@@ -43,5 +44,10 @@ export async function generateDraft(productName, features, analysis) {
 
 export async function generateTemplate(script) {
   const result = await generateTemplateFn({ script });
-  return result.data.data; // { hookType, isNewType, empathyPoint, template }
+  return result.data.data;
+}
+
+export async function generateFinalScript(steps, hookType) {
+  const result = await generateFinalScriptFn({ steps, hookType });
+  return result.data.data; // { script }
 }
