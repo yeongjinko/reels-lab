@@ -314,7 +314,7 @@ function parseJsonFromText(text) {
 }
 
 exports.analyzeScript = onCall(
-  { secrets: [anthropicApiKey] },
+  { secrets: [anthropicApiKey], cors: true },
   async (request) => {
     if (!request.auth) {
       throw new HttpsError('unauthenticated', '로그인이 필요합니다.');
@@ -357,7 +357,7 @@ exports.analyzeScript = onCall(
 );
 
 exports.generateContextOptions = onCall(
-  { secrets: [anthropicApiKey] },
+  { secrets: [anthropicApiKey], cors: true },
   async (request) => {
     if (!request.auth) throw new HttpsError('unauthenticated', '로그인이 필요합니다.');
     const { word, sentence, fullScript } = request.data;
@@ -389,7 +389,7 @@ exports.generateContextOptions = onCall(
 );
 
 exports.updateSentencesWithContext = onCall(
-  { secrets: [anthropicApiKey] },
+  { secrets: [anthropicApiKey], cors: true },
   async (request) => {
     if (!request.auth) throw new HttpsError('unauthenticated', '로그인이 필요합니다.');
     const { sentences, contextMap } = request.data;
@@ -424,7 +424,7 @@ exports.updateSentencesWithContext = onCall(
 );
 
 exports.refineSentence = onCall(
-  { secrets: [anthropicApiKey] },
+  { secrets: [anthropicApiKey], cors: true },
   async (request) => {
     if (!request.auth) throw new HttpsError('unauthenticated', '로그인이 필요합니다.');
     const { text, effect, feedback } = request.data;
@@ -454,7 +454,7 @@ exports.refineSentence = onCall(
 );
 
 exports.refineAnalysis = onCall(
-  { secrets: [anthropicApiKey] },
+  { secrets: [anthropicApiKey], cors: true },
   async (request) => {
     if (!request.auth) throw new HttpsError('unauthenticated', '로그인이 필요합니다.');
     const { sentences, hookFormula, hookFormulaDesc, feedback } = request.data;
@@ -587,7 +587,7 @@ const GENERATE_FINAL_SCRIPT_PROMPT = `너는 릴스 스크립트 작성 전문�
 }`;
 
 exports.generateTemplate = onCall(
-  { secrets: [anthropicApiKey], timeoutSeconds: 300 },
+  { secrets: [anthropicApiKey], timeoutSeconds: 300, cors: true },
   async (request) => {
     if (!request.auth) throw new HttpsError('unauthenticated', '로그인이 필요합니다.');
 
@@ -643,7 +643,7 @@ exports.generateTemplate = onCall(
 );
 
 exports.generateFinalScript = onCall(
-  { secrets: [anthropicApiKey], timeoutSeconds: 300 },
+  { secrets: [anthropicApiKey], timeoutSeconds: 300, cors: true },
   async (request) => {
     if (!request.auth) throw new HttpsError('unauthenticated', '로그인이 필요합니다.');
 
@@ -682,7 +682,7 @@ exports.generateFinalScript = onCall(
 );
 
 exports.generateScript = onCall(
-  { secrets: [anthropicApiKey] },
+  { secrets: [anthropicApiKey], cors: true },
   async (request) => {
     if (!request.auth) {
       throw new HttpsError('unauthenticated', '로그인이 필요합니다.');
