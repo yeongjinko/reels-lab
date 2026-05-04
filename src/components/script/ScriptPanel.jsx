@@ -17,47 +17,60 @@ function tryRestoreStepsDraft(refText, stepsLen) {
 }
 
 function QuestionModal({ hookType, empathyPoint, onComplete, onClose }) {
-  const [loading, setLoading] = useState(false);
-  const [questionData, setQuestionData] = useState(null);
+  // phase: 'initialLoading' | 'alignment' | 'noMatch' | 'asking' | 'qLoading' | 'error'
+  const [phase, setPhase] = useState('initialLoading');
+  const [suitableFor, setSuitableFor] = useState([]);
+  const [firstQ, setFirstQ] = useState(null);
+  const [currentQ, setCurrentQ] = useState(null);
   const [history, setHistory] = useState([]);
   const [answer, setAnswer] = useState('');
   const [error, setError] = useState('');
 
-  useEffect(() => {
-    fetchNext([]);
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { loadFirst(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  async function fetchNext(hist) {
-    setLoading(true);
+  async function loadFirst() {
+    setPhase('initialLoading');
     setError('');
     try {
-      const data = await generateQuestions(hookType, empathyPoint, hist);
-      if (data.isComplete) {
-        onComplete(data.collectedInfo || {});
-      } else {
-        setQuestionData(data);
-        setAnswer('');
-      }
+      const data = await generateQuestions(hookType, empathyPoint, []);
+      setSuitableFor(data.suitableFor || []);
+      setFirstQ(data);
+      setPhase('alignment');
     } catch (e) {
-      setError(e.message || '질문 생성 중 오류가 발생했습니다.');
-    } finally {
-      setLoading(false);
+      setError(e.message || '오류가 발생했습니다.');
+      setPhase('error');
     }
   }
 
   async function handleSubmit() {
     const trimmed = answer.trim();
-    if (!trimmed || !questionData) return;
-    const newHistory = [...history, { question: questionData.question, answer: trimmed }];
+    if (!trimmed || !currentQ) return;
+    const newHistory = [...history, { question: currentQ.question, answer: trimmed }];
     setHistory(newHistory);
+    setAnswer('');
     if (newHistory.length >= 5) {
-      onComplete(questionData.collectedInfo || {});
+      onComplete(currentQ.collectedInfo || {});
       return;
     }
-    await fetchNext(newHistory);
+    setPhase('qLoading');
+    setError('');
+    try {
+      const data = await generateQuestions(hookType, empathyPoint, newHistory);
+      if (data.isComplete) {
+        onComplete(data.collectedInfo || {});
+      } else {
+        setCurrentQ(data);
+        setPhase('asking');
+      }
+    } catch (e) {
+      setError(e.message || '질문 생성 중 오류가 발생했습니다.');
+      setPhase('error');
+    }
   }
 
   const stepNum = history.length + 1;
+  const isAsking = phase === 'asking';
+  const isLoading = phase === 'initialLoading' || phase === 'qLoading';
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-end sm:items-center justify-center z-50 p-0 sm:p-4">
@@ -65,10 +78,10 @@ function QuestionModal({ hookType, empathyPoint, onComplete, onClose }) {
         {/* 헤더 */}
         <div className="flex items-center justify-between px-5 pt-5 pb-3 border-b border-gray-100 flex-shrink-0">
           <div>
-            <h3 className="font-bold text-gray-900 text-sm">내 콘텐츠 정보 입력</h3>
-            {questionData && !loading && (
-              <p className="text-xs text-gray-400 mt-0.5">질문 {stepNum} / 최대 5</p>
-            )}
+            <h3 className="font-bold text-gray-900 text-sm">
+              {phase === 'alignment' ? '결 맞는지 확인' : phase === 'noMatch' ? '다른 레퍼런스 찾기' : '내 콘텐츠 정보 입력'}
+            </h3>
+            {isAsking && <p className="text-xs text-gray-400 mt-0.5">질문 {stepNum} / 최대 5</p>}
           </div>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600 transition-colors p-1">
             <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -79,49 +92,85 @@ function QuestionModal({ hookType, empathyPoint, onComplete, onClose }) {
 
         {/* 콘텐츠 */}
         <div className="flex-1 overflow-y-auto px-5 py-4">
-          {loading ? (
+
+          {/* 로딩 */}
+          {isLoading && (
             <div className="flex flex-col items-center justify-center py-10 gap-3">
               <div className="w-5 h-5 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
-              <p className="text-xs text-gray-400">{history.length === 0 ? '첫 번째 질문을 준비 중...' : '다음 질문을 준비 중...'}</p>
+              <p className="text-xs text-gray-400">
+                {phase === 'initialLoading' ? '이 릴스가 어떤 상황에 맞는지 확인 중...' : '다음 질문 준비 중...'}
+              </p>
             </div>
-          ) : error ? (
-            <div className="flex flex-col gap-3 py-4">
-              <div className="bg-red-50 border border-red-200 text-red-600 text-xs rounded-xl px-4 py-3">{error}</div>
+          )}
+
+          {/* 결 맞는지 확인 */}
+          {phase === 'alignment' && (
+            <div className="flex flex-col gap-3">
+              <p className="text-sm font-semibold text-gray-800">이 릴스는 이런 상황에 잘 맞아요</p>
+              <div className="flex flex-col gap-2 mt-1">
+                {suitableFor.map((item, i) => (
+                  <button
+                    key={i}
+                    onClick={() => { setCurrentQ(firstQ); setPhase('asking'); }}
+                    className="flex items-center gap-3 text-left w-full px-4 py-3.5 border border-gray-200 rounded-xl hover:border-indigo-400 hover:bg-indigo-50 transition-colors group"
+                  >
+                    <div className="w-4 h-4 rounded-full border-2 border-gray-300 group-hover:border-indigo-500 flex-shrink-0 transition-colors" />
+                    <span className="text-sm text-gray-700 group-hover:text-indigo-800 leading-snug">{item}</span>
+                  </button>
+                ))}
+                <button
+                  onClick={() => setPhase('noMatch')}
+                  className="flex items-center gap-3 text-left w-full px-4 py-3.5 border border-gray-200 rounded-xl hover:bg-gray-50 transition-colors group"
+                >
+                  <div className="w-4 h-4 rounded-full border-2 border-gray-200 flex-shrink-0" />
+                  <span className="text-sm text-gray-400">해당 없음</span>
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* 해당 없음 */}
+          {phase === 'noMatch' && (
+            <div className="flex flex-col gap-4 py-2">
+              <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
+                <p className="text-sm font-semibold text-amber-800 mb-1.5">이 레퍼런스는 다른 상황에 맞아요</p>
+                <p className="text-xs text-amber-700 leading-relaxed">{empathyPoint || '이 구조는 특정 후킹 유형에 맞게 설계됐어요.'}</p>
+              </div>
+              <p className="text-xs text-gray-500 leading-relaxed">내 상황에 맞는 다른 레퍼런스를 찾아보시겠어요?</p>
               <button
-                onClick={() => fetchNext(history)}
-                className="text-sm text-indigo-600 border border-indigo-200 hover:bg-indigo-50 font-semibold py-2.5 rounded-xl transition-colors"
+                onClick={onClose}
+                className="w-full flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-3 rounded-xl transition-colors text-sm"
               >
-                다시 시도
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7v8a2 2 0 002 2h6M8 7V5a2 2 0 012-2h4.586a1 1 0 01.707.293l4.414 4.414a1 1 0 01.293.707V15a2 2 0 01-2 2h-2M8 7H6a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2v-2" />
+                </svg>
+                레퍼런스 라이브러리 보기
               </button>
             </div>
-          ) : questionData ? (
+          )}
+
+          {/* Q&A */}
+          {isAsking && currentQ && (
             <div className="flex flex-col gap-4">
-              {/* 레퍼런스 예시 */}
-              {questionData.referenceExample && (
+              {currentQ.referenceExample && (
                 <div className="bg-orange-50 border border-orange-100 rounded-xl px-4 py-3">
                   <p className="text-[10px] font-bold text-orange-400 uppercase tracking-wider mb-1">레퍼런스 패턴</p>
-                  <p className="text-xs text-orange-800 italic">"{questionData.referenceExample}"</p>
+                  <p className="text-xs text-orange-800 italic">"{currentQ.referenceExample}"</p>
                 </div>
               )}
-
-              {/* 질문 */}
               <div className="bg-indigo-50 border border-indigo-100 rounded-xl px-4 py-3">
-                <p className="text-sm font-semibold text-indigo-900 leading-relaxed">{questionData.question}</p>
+                <p className="text-sm font-semibold text-indigo-900 leading-relaxed">{currentQ.question}</p>
               </div>
-
-              {/* 예시 버튼 */}
-              {questionData.examples?.length > 0 && (
+              {currentQ.examples?.length > 0 && (
                 <div>
                   <p className="text-[11px] font-bold text-gray-400 mb-2">💡 예시 선택</p>
                   <div className="flex flex-col gap-1.5">
-                    {questionData.examples.map((ex, i) => (
+                    {currentQ.examples.map((ex, i) => (
                       <button
                         key={i}
                         onClick={() => setAnswer(ex)}
                         className={`text-left text-xs px-3 py-2 rounded-lg border transition-colors ${
-                          answer === ex
-                            ? 'bg-indigo-600 text-white border-indigo-600'
-                            : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'
+                          answer === ex ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'
                         }`}
                       >
                         {ex}
@@ -130,8 +179,6 @@ function QuestionModal({ hookType, empathyPoint, onComplete, onClose }) {
                   </div>
                 </div>
               )}
-
-              {/* 직접 입력 */}
               <div>
                 <label className="block text-[11px] font-bold text-gray-500 mb-1.5">직접 입력</label>
                 <textarea
@@ -143,8 +190,6 @@ function QuestionModal({ hookType, empathyPoint, onComplete, onClose }) {
                   onKeyDown={(e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) handleSubmit(); }}
                 />
               </div>
-
-              {/* 이전 답변 요약 */}
               {history.length > 0 && (
                 <div className="bg-gray-50 border border-gray-100 rounded-xl p-3">
                   <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-2">지금까지 답변</p>
@@ -159,11 +204,24 @@ function QuestionModal({ hookType, empathyPoint, onComplete, onClose }) {
                 </div>
               )}
             </div>
-          ) : null}
+          )}
+
+          {/* 에러 */}
+          {phase === 'error' && (
+            <div className="flex flex-col gap-3 py-4">
+              <div className="bg-red-50 border border-red-200 text-red-600 text-xs rounded-xl px-4 py-3">{error}</div>
+              <button
+                onClick={history.length === 0 ? loadFirst : () => setPhase('asking')}
+                className="text-sm text-indigo-600 border border-indigo-200 hover:bg-indigo-50 font-semibold py-2.5 rounded-xl transition-colors"
+              >
+                다시 시도
+              </button>
+            </div>
+          )}
         </div>
 
         {/* 하단 버튼 */}
-        {!loading && questionData && !error && (
+        {isAsking && currentQ && (
           <div className="px-5 pb-5 pt-3 border-t border-gray-100 flex-shrink-0">
             <button
               onClick={handleSubmit}
