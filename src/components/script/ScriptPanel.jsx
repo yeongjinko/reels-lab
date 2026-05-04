@@ -16,6 +16,66 @@ function tryRestoreStepsDraft(refText, stepsLen) {
   return { answers: new Array(stepsLen).fill(''), currentStep: 0, done: false };
 }
 
+function InfoModal({ onConfirm, onClose, initialValues = {} }) {
+  const [topic, setTopic] = useState(initialValues.topic || '');
+  const [target, setTarget] = useState(initialValues.target || '');
+  const [strength, setStrength] = useState(initialValues.strength || '');
+
+  return (
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm p-6 flex flex-col gap-4">
+        <div>
+          <h3 className="font-bold text-gray-900 text-base mb-1">내 정보 입력</h3>
+          <p className="text-xs text-gray-500">입력하면 내 상황에 맞는 표현을 추천해드려요</p>
+        </div>
+        <div className="flex flex-col gap-3">
+          <div>
+            <label className="block text-xs font-bold text-gray-700 mb-1">상품 또는 주제</label>
+            <input
+              value={topic}
+              onChange={(e) => setTopic(e.target.value)}
+              placeholder="예) 의류 쇼핑몰 광고 전략"
+              className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-bold text-gray-700 mb-1">타겟</label>
+            <input
+              value={target}
+              onChange={(e) => setTarget(e.target.value)}
+              placeholder="예) 쇼핑몰 초보 대표"
+              className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-bold text-gray-700 mb-1">내 강점 또는 경험</label>
+            <input
+              value={strength}
+              onChange={(e) => setStrength(e.target.value)}
+              placeholder="예) 1년 만에 월 2억 달성"
+              className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+            />
+          </div>
+        </div>
+        <div className="flex gap-2 mt-1">
+          <button
+            onClick={onClose}
+            className="flex-1 text-sm text-gray-500 hover:text-gray-700 border border-gray-200 hover:bg-gray-50 font-semibold py-2.5 rounded-xl transition-colors"
+          >
+            취소
+          </button>
+          <button
+            onClick={() => onConfirm({ topic: topic.trim(), target: target.trim(), strength: strength.trim() })}
+            className="flex-1 text-sm bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-2.5 rounded-xl transition-colors"
+          >
+            가이드 생성하기
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function StepCard({ step, index, total, answer, onAnswerChange, onNext, onPrev }) {
   const isLast = index === total - 1;
   console.log(`[StepCard] index=${index} step:`, step);
@@ -68,6 +128,22 @@ function StepCard({ step, index, total, answer, onAnswerChange, onNext, onPrev }
           rows={3}
           className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm text-gray-800 leading-relaxed resize-none outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent bg-white placeholder-gray-400"
         />
+        {step.suggestions?.length > 0 && (
+          <div className="mt-2.5">
+            <p className="text-[11px] font-bold text-gray-400 mb-1.5">💡 이런 표현 어때요?</p>
+            <div className="flex flex-col gap-1.5">
+              {step.suggestions.map((s, i) => (
+                <button
+                  key={i}
+                  onClick={() => onAnswerChange(answer ? `${answer} ${s}` : s)}
+                  className="text-left text-xs text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-100 px-3 py-2 rounded-lg transition-colors"
+                >
+                  {s}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* 이동 버튼 */}
@@ -278,6 +354,9 @@ export default function ScriptPanel({ analysis, referenceText, referenceId, init
   const [saved, setSaved] = useState(false);
   const [toast, setToast] = useState('');
 
+  const [showInfoModal, setShowInfoModal] = useState(false);
+  const [userInfo, setUserInfo] = useState({});
+
   useEffect(() => {
     if (!referenceText || !templateData) return;
     try {
@@ -303,14 +382,14 @@ export default function ScriptPanel({ analysis, referenceText, referenceId, init
     setDone(restored.done);
   }, [referenceText, analysis]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  async function handleGenerateTemplate() {
+  async function handleGenerateTemplate(info = {}) {
     if (!referenceText || loading) return;
     setLoading(true);
     setError('');
     setTemplateData(null);
     setSaved(false);
     try {
-      const data = await generateTemplate(referenceText);
+      const data = await generateTemplate(referenceText, info);
       console.log('[ScriptPanel] generateTemplate 응답:', JSON.stringify({
         hookType: data?.hookType,
         stepsLen: data?.steps?.length,
@@ -383,6 +462,17 @@ export default function ScriptPanel({ analysis, referenceText, referenceId, init
           {toast}
         </div>
       )}
+      {showInfoModal && (
+        <InfoModal
+          initialValues={userInfo}
+          onClose={() => setShowInfoModal(false)}
+          onConfirm={(info) => {
+            setUserInfo(info);
+            setShowInfoModal(false);
+            handleGenerateTemplate(info);
+          }}
+        />
+      )}
       <div className="flex flex-col h-full">
         <div className="p-5 border-b border-gray-100 flex-shrink-0">
           <h2 className="font-bold text-gray-900 mb-0.5">스크립트 작성</h2>
@@ -410,7 +500,7 @@ export default function ScriptPanel({ analysis, referenceText, referenceId, init
                 {error}
               </div>
               <button
-                onClick={handleGenerateTemplate}
+                onClick={() => setShowInfoModal(true)}
                 className="flex items-center justify-center gap-2 text-sm font-semibold text-indigo-600 hover:text-indigo-700 border border-indigo-200 hover:bg-indigo-50 px-4 py-2.5 rounded-xl transition-colors"
               >
                 <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -430,7 +520,7 @@ export default function ScriptPanel({ analysis, referenceText, referenceId, init
                 레퍼런스 문장 하나하나를 분석해서<br />내 상황에 맞는 질문을 만들어드려요
               </p>
               <button
-                onClick={handleGenerateTemplate}
+                onClick={() => setShowInfoModal(true)}
                 className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold px-5 py-2.5 rounded-xl transition-colors text-sm"
               >
                 <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">

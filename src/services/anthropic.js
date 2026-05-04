@@ -42,8 +42,8 @@ export async function generateDraft(productName, features, analysis) {
   return result.data.data;
 }
 
-export async function generateTemplate(script) {
-  const result = await generateTemplateFn({ script });
+export async function generateTemplate(script, userInfo = {}) {
+  const result = await generateTemplateFn({ script, ...userInfo });
   return result.data.data;
 }
 

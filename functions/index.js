@@ -532,6 +532,7 @@ const GENERATE_TEMPLATE_PROMPT = `너는 릴스 스크립트 코치야.
 - effect: 시청자가 이 문장에서 느끼는 심리적 효과 (1~2문장)
 - question: 사용자가 자신의 상품으로 이 구조를 활용할 수 있도록 유도하는 질문 (1문장, 쉽고 구체적으로)
 - questionHint: 질문에 대한 예시 답변 ("예) "로 시작)
+- suggestions: 이 구조를 사용자의 상황에 맞게 바로 쓸 수 있는 표현 3개 (각 10~30자, 구어체). 사용자 정보가 제공된 경우 그 상품/타겟/강점에 맞게, 없으면 일반적인 표현으로.
 
 === 출력 예시 ===
 
@@ -549,21 +550,24 @@ const GENERATE_TEMPLATE_PROMPT = `너는 릴스 스크립트 코치야.
       "role": "후킹 문장",
       "effect": "선망 브랜드를 안 입는다는 반전 고백으로 예측오류를 만들어, 시청자가 '왜?'라는 궁금증을 갖고 영상을 멈추게 한다.",
       "question": "시청자들이 당연히 쓸 거라 생각하는 선택지가 뭐고, 나는 그걸 왜 안 쓰나요?",
-      "questionHint": "예) 다들 대형 마트 제품을 쓰는데, 저는 소형 브랜드 제품을 써요"
+      "questionHint": "예) 다들 대형 마트 제품을 쓰는데, 저는 소형 브랜드 제품을 써요",
+      "suggestions": ["저는 그 유명한 OO 안 써요, 이게 더 좋더라고요", "다들 당연하게 쓰는 OO, 저는 오히려 안 써요", "OO 쓰다 버리고 찾아낸 진짜 제품"]
     },
     {
       "sentence": "대신 이거 입어요 / 이게 뭐냐구요?",
       "role": "호기심 증폭",
       "effect": "대안을 제시하면서 '이게 뭔데?'라는 궁금증을 극대화해 다음 내용을 끝까지 보게 만든다.",
       "question": "내 상품을 처음 접하는 사람이 가장 먼저 갖는 의문이나 궁금증은 뭔가요?",
-      "questionHint": "예) 이 소재가 뭐예요? 어디서 살 수 있어요?"
+      "questionHint": "예) 이 소재가 뭐예요? 어디서 살 수 있어요?",
+      "suggestions": ["이게 뭔지 아세요? 저도 처음엔 몰랐어요", "이름 들어보셨어요? 아직 잘 모르는 분들 많더라고요", "이거 써보기 전까지는 저도 몰랐어요"]
     },
     {
       "sentence": "알로 반의 반값으로 살 수 있어요!",
       "role": "가격 반전",
       "effect": "앞서 언급한 고가 브랜드와 가격을 직접 비교해, 기대값 대비 충격적인 가성비를 강조한다.",
       "question": "내 상품의 가격이나 가성비를 경쟁 제품과 비교하면 어떤 말로 표현할 수 있나요?",
-      "questionHint": "예) 백화점 제품의 30% 가격에 비슷한 품질"
+      "questionHint": "예) 백화점 제품의 30% 가격에 비슷한 품질",
+      "suggestions": ["백화점 가격의 반도 안 돼요", "같은 퀄리티인데 OO원 더 싸요", "이 가격에 이 퀄리티, 처음 봤어요"]
     }
   ]
 }
@@ -596,7 +600,7 @@ exports.generateTemplate = onCall(
   async (request) => {
     if (!request.auth) throw new HttpsError('unauthenticated', '로그인이 필요합니다.');
 
-    const { script } = request.data;
+    const { script, topic, target, strength } = request.data;
     if (!script || typeof script !== 'string' || script.trim().length === 0) {
       throw new HttpsError('invalid-argument', '대본을 입력해주세요.');
     }
@@ -608,13 +612,23 @@ exports.generateTemplate = onCall(
     const db = admin.firestore();
 
     try {
-      console.log('generateTemplate START — script length:', script.trim().length);
+      let userContent = `대본:\n${script.trim()}`;
+      const hasUserInfo = topic || target || strength;
+      if (hasUserInfo) {
+        userContent += '\n\n사용자 정보:';
+        if (topic) userContent += `\n- 상품/주제: ${topic}`;
+        if (target) userContent += `\n- 타겟: ${target}`;
+        if (strength) userContent += `\n- 강점/경험: ${strength}`;
+        userContent += '\n\n각 step의 suggestions는 위 사용자 정보에 맞춰 바로 쓸 수 있는 구체적인 표현으로 작성해주세요.';
+      }
+
+      console.log('generateTemplate START — script length:', script.trim().length, '| hasUserInfo:', !!hasUserInfo);
       const t0 = Date.now();
       const message = await client.messages.create({
         model: MODEL,
         max_tokens: 8192,
         system: GENERATE_TEMPLATE_PROMPT,
-        messages: [{ role: 'user', content: `대본:\n${script.trim()}` }],
+        messages: [{ role: 'user', content: userContent }],
       });
       const rawText = message.content[0].text;
       console.log('generateTemplate API done —', Date.now() - t0, 'ms | stop_reason:', message.stop_reason, '| raw length:', rawText.length);
