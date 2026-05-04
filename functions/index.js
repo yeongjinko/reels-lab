@@ -709,7 +709,7 @@ exports.generateTemplate = onCall(
       const t0 = Date.now();
       const message = await client.messages.create({
         model: MODEL,
-        max_tokens: 8192,
+        max_tokens: 2000,
         system: GENERATE_TEMPLATE_PROMPT,
         messages: [{ role: 'user', content: userContent }],
       });
@@ -745,7 +745,7 @@ exports.generateTemplate = onCall(
 );
 
 exports.generateQuestions = onCall(
-  { secrets: [anthropicApiKey], cors: true },
+  { secrets: [anthropicApiKey], timeoutSeconds: 300, cors: true },
   async (request) => {
     if (!request.auth) throw new HttpsError('unauthenticated', '로그인이 필요합니다.');
 
@@ -767,7 +767,7 @@ ${historyText ? `\n지금까지 대화:\n${historyText}\n\n다음 질문을 진�
 
       const message = await client.messages.create({
         model: MODEL,
-        max_tokens: 1024,
+        max_tokens: 500,
         system: GENERATE_QUESTIONS_PROMPT,
         messages: [{ role: 'user', content: userContent }],
       });
