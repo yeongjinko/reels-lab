@@ -232,7 +232,7 @@ const ANALYSIS_PROMPT = `너는 의류 쇼핑몰 및 숏폼 콘텐츠 릴스 스
 
 === 응답 형식 (반드시 JSON만) ===
 {
-  "needsContext": ["맥락이 필요한 단어들 — 없으면 빈 배열"],
+  "needsContext": ["단어만 (설명 없이, 예: 룰루레몬, 알로, 언니). 맥락 없으면 빈 배열 []"],
   "hookFormula": "추출된 후킹 공식",
   "hookFormulaType": "유형명 : 시청자 속마음 (예: 브랜드반전형 : 이걸 왜 안 입어?)",
   "hookFormulaDesc": "공식 구조 설명 (A=?, B=? 형태로)",
@@ -343,7 +343,12 @@ exports.analyzeScript = onCall(
       const result = parseJsonFromText(message.content[0].text);
 
       const { needsContext: _nc, ...analysisData } = result;
-      const contextWords = Array.isArray(result.needsContext) ? result.needsContext : [];
+      // AI가 "단어 — 설명" 형태로 반환할 경우 " — " 이후 설명 제거, 10자 초과 항목 필터
+      const contextWords = Array.isArray(result.needsContext)
+        ? result.needsContext
+            .map((w) => String(w).split(/\s*[—–]\s*/)[0].trim())
+            .filter((w) => w.length > 0 && w.length <= 10)
+        : [];
       if (contextWords.length > 0) {
         return { success: true, needsContext: true, words: contextWords, data: analysisData };
       }
