@@ -492,6 +492,85 @@ exports.refineAnalysis = onCall(
   }
 );
 
+const GENERATE_QUESTIONS_PROMPT = `너는 숏폼/릴스 콘텐츠 제작 코치야.
+레퍼런스 분석 결과를 보고 이 콘텐츠가 어떤 타입인지 먼저 판단해.
+
+=== 콘텐츠 타입 판단 기준 ===
+
+상품판매형:
+- 후킹 유형: 결과제시형, 브랜드반전형, 인지부조화형, 군중심리형, before/after형, 숫자형, 금지형, 질문형, 비교형, 버리기형, 절약보장형, 상위%공개형, 의외의인물성과형, 발견공유형
+- 질문 루트: 문제 → 해결 → 상품 경험
+
+정보/노하우형:
+- 후킹 유형: 역설적신뢰형, 전문가반전형, 비밀공개형, 쉬운행동+큰결과형
+- 질문 루트: 실패 → 깨달음 → 방법
+
+서비스/컨설팅형:
+- 후킹 유형: 스토리증명형, 손실경고형, 의외의인물성과형
+- 질문 루트: 고객사례 → 변화 → 결과
+
+스토리텔링형:
+- 후킹 유형: 고백형, 공감형, 반성유도형
+- 질문 루트: 과거 → 전환점 → 현재
+
+=== 타입별 질문 루트 ===
+
+상품판매형 질문 순서:
+1. 어떤 상품이야?
+2. 직접 써봤어? 아니면 고객 반응만 있어?
+   (직접 경험 있으면) 이거 잘못 선택하면 어떻게 돼?
+   (경험 없으면) 고객들이 이거 살 때 가장 고민하는 게 뭐야?
+3. 그 문제를 해결하는 핵심이 뭐야?
+4. 주변이나 고객 반응이 어땠어?
+
+정보/노하우형 질문 순서:
+1. 어떤 정보/노하우를 알려줄 거야?
+2. 이걸 알기 전에 어떤 실수나 실패를 했어?
+3. 어떤 계기로 이걸 알게 됐어?
+4. 이걸 알고 나서 뭐가 달라졌어? 수치로 말해줄 수 있어?
+
+서비스/컨설팅형 질문 순서:
+1. 어떤 서비스야?
+2. 실제로 도움받은 고객 사례 있어?
+3. 그 고객이 오기 전 상황이 어땠어?
+4. 서비스 받고 나서 어떻게 달라졌어?
+
+스토리텔링형 질문 순서:
+1. 어떤 이야기를 하고 싶어?
+2. 그 전에 어떤 상황이었어? 가장 힘들었던 순간은?
+3. 뭐가 바뀌게 된 계기가 뭐야?
+4. 지금은 어떻게 됐어?
+5. 이 이야기를 보는 사람이 뭘 느꼈으면 해?
+
+=== 질문 원칙 ===
+
+- 한 번에 하나만 질문
+- 구체적인 경험을 끌어내는 질문
+- examples: 클릭하면 바로 쓸 수 있는 예시 2~3개 제공 (실제 사용 가능한 표현)
+- referenceExample: 레퍼런스 후킹 유형에서 이 질문과 연관된 대표 문장 패턴 1개 (예: "저는 룰루레몬 못 입어요!")
+- 최대 5번 넘지 않기
+- 답변이 짧거나 불명확하면 한 번 더 파고들기
+- 매 답변마다 정보가 충분한지 판단 — 충분하면 isComplete: true
+
+반드시 JSON만 반환:
+{
+  "contentType": "상품판매|정보노하우|서비스컨설팅|스토리텔링",
+  "question": "질문 내용",
+  "referenceExample": "관련 레퍼런스 문장 패턴",
+  "examples": ["예시1", "예시2", "예시3"],
+  "isComplete": false,
+  "collectedInfo": {
+    "topic": "",
+    "contentType": "",
+    "hasExperience": null,
+    "problem": "",
+    "solution": "",
+    "strength": "",
+    "target": "",
+    "story": ""
+  }
+}`;
+
 const GENERATE_TEMPLATE_PROMPT = `너는 릴스 스크립트 코치야.
 레퍼런스 대본의 각 문장을 분석해서 문장별 역할과 심리 효과를 파악하고,
 사용자가 자신의 상품으로 같은 구조의 대본을 쓸 수 있도록 코칭 질문을 만들어줘.
@@ -600,7 +679,7 @@ exports.generateTemplate = onCall(
   async (request) => {
     if (!request.auth) throw new HttpsError('unauthenticated', '로그인이 필요합니다.');
 
-    const { script, topic, target, strength } = request.data;
+    const { script, topic, target, strength, problem, solution, story, contentType: userContentType } = request.data;
     if (!script || typeof script !== 'string' || script.trim().length === 0) {
       throw new HttpsError('invalid-argument', '대본을 입력해주세요.');
     }
@@ -613,12 +692,16 @@ exports.generateTemplate = onCall(
 
     try {
       let userContent = `대본:\n${script.trim()}`;
-      const hasUserInfo = topic || target || strength;
+      const hasUserInfo = topic || target || strength || problem || solution || story;
       if (hasUserInfo) {
         userContent += '\n\n사용자 정보:';
+        if (userContentType) userContent += `\n- 콘텐츠 타입: ${userContentType}`;
         if (topic) userContent += `\n- 상품/주제: ${topic}`;
         if (target) userContent += `\n- 타겟: ${target}`;
         if (strength) userContent += `\n- 강점/경험: ${strength}`;
+        if (problem) userContent += `\n- 해결하는 문제: ${problem}`;
+        if (solution) userContent += `\n- 해결 방법: ${solution}`;
+        if (story) userContent += `\n- 스토리: ${story}`;
         userContent += '\n\n각 step의 suggestions는 위 사용자 정보에 맞춰 바로 쓸 수 있는 구체적인 표현으로 작성해주세요.';
       }
 
@@ -657,6 +740,46 @@ exports.generateTemplate = onCall(
       console.error('generateTemplate error — type:', e?.constructor?.name, '| message:', e?.message, '| full:', JSON.stringify(e));
       if (e instanceof HttpsError) throw e;
       throw new HttpsError('internal', '템플릿 생성 중 오류가 발생했습니다.');
+    }
+  }
+);
+
+exports.generateQuestions = onCall(
+  { secrets: [anthropicApiKey], cors: true },
+  async (request) => {
+    if (!request.auth) throw new HttpsError('unauthenticated', '로그인이 필요합니다.');
+
+    const { hookType, empathyPoint, history = [] } = request.data;
+    if (!hookType) {
+      throw new HttpsError('invalid-argument', '분석 결과가 필요합니다.');
+    }
+
+    const client = new Anthropic({ apiKey: anthropicApiKey.value() });
+
+    try {
+      const historyText = history.length > 0
+        ? history.map((h, i) => `Q${i + 1}: ${h.question}\nA${i + 1}: ${h.answer}`).join('\n\n')
+        : '';
+
+      const userContent = `레퍼런스 후킹 유형: ${hookType}
+레퍼런스 공감 포인트: ${empathyPoint || ''}
+${historyText ? `\n지금까지 대화:\n${historyText}\n\n다음 질문을 진행해줘.` : '\n첫 번째 질문을 시작해줘.'}`;
+
+      const message = await client.messages.create({
+        model: MODEL,
+        max_tokens: 1024,
+        system: GENERATE_QUESTIONS_PROMPT,
+        messages: [{ role: 'user', content: userContent }],
+      });
+
+      const rawText = message.content[0].text;
+      const result = parseJsonFromText(rawText);
+      console.log('generateQuestions — step:', history.length + 1, '| isComplete:', result?.isComplete, '| contentType:', result?.contentType);
+      return { success: true, data: result };
+    } catch (e) {
+      console.error('generateQuestions error:', e?.message);
+      if (e instanceof HttpsError) throw e;
+      throw new HttpsError('internal', '질문 생성 중 오류가 발생했습니다.');
     }
   }
 );

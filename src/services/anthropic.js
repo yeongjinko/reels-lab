@@ -11,6 +11,7 @@ const generateContextOptionsFn = httpsCallable(functions, 'generateContextOption
 const updateSentencesWithContextFn = httpsCallable(functions, 'updateSentencesWithContext');
 const generateTemplateFn = httpsCallable(functions, 'generateTemplate');
 const generateFinalScriptFn = httpsCallable(functions, 'generateFinalScript');
+const generateQuestionsFn = httpsCallable(functions, 'generateQuestions');
 
 export async function analyzeReference(text) {
   const result = await analyzeScriptFn({ text });
@@ -50,4 +51,9 @@ export async function generateTemplate(script, userInfo = {}) {
 export async function generateFinalScript(steps, hookType) {
   const result = await generateFinalScriptFn({ steps, hookType });
   return result.data.data; // { script }
+}
+
+export async function generateQuestions(hookType, empathyPoint, history = []) {
+  const result = await generateQuestionsFn({ hookType, empathyPoint, history });
+  return result.data.data;
 }

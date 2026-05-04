@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from '../../firebase/config';
 import { useApp } from '../../App';
-import { generateTemplate, generateFinalScript } from '../../services/anthropic';
+import { generateTemplate, generateFinalScript, generateQuestions } from '../../services/anthropic';
 
 const STEPS_DRAFT_KEY = 'rlab_steps_draft';
 
@@ -16,61 +16,163 @@ function tryRestoreStepsDraft(refText, stepsLen) {
   return { answers: new Array(stepsLen).fill(''), currentStep: 0, done: false };
 }
 
-function InfoModal({ onConfirm, onClose, initialValues = {} }) {
-  const [topic, setTopic] = useState(initialValues.topic || '');
-  const [target, setTarget] = useState(initialValues.target || '');
-  const [strength, setStrength] = useState(initialValues.strength || '');
+function QuestionModal({ hookType, empathyPoint, onComplete, onClose }) {
+  const [loading, setLoading] = useState(false);
+  const [questionData, setQuestionData] = useState(null);
+  const [history, setHistory] = useState([]);
+  const [answer, setAnswer] = useState('');
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    fetchNext([]);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function fetchNext(hist) {
+    setLoading(true);
+    setError('');
+    try {
+      const data = await generateQuestions(hookType, empathyPoint, hist);
+      if (data.isComplete) {
+        onComplete(data.collectedInfo || {});
+      } else {
+        setQuestionData(data);
+        setAnswer('');
+      }
+    } catch (e) {
+      setError(e.message || '질문 생성 중 오류가 발생했습니다.');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleSubmit() {
+    const trimmed = answer.trim();
+    if (!trimmed || !questionData) return;
+    const newHistory = [...history, { question: questionData.question, answer: trimmed }];
+    setHistory(newHistory);
+    await fetchNext(newHistory);
+  }
+
+  const stepNum = history.length + 1;
 
   return (
-    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm p-6 flex flex-col gap-4">
-        <div>
-          <h3 className="font-bold text-gray-900 text-base mb-1">내 정보 입력</h3>
-          <p className="text-xs text-gray-500">입력하면 내 상황에 맞는 표현을 추천해드려요</p>
-        </div>
-        <div className="flex flex-col gap-3">
+    <div className="fixed inset-0 bg-black/50 flex items-end sm:items-center justify-center z-50 p-0 sm:p-4">
+      <div className="bg-white rounded-t-2xl sm:rounded-2xl shadow-xl w-full sm:max-w-md flex flex-col max-h-[90vh]">
+        {/* 헤더 */}
+        <div className="flex items-center justify-between px-5 pt-5 pb-3 border-b border-gray-100 flex-shrink-0">
           <div>
-            <label className="block text-xs font-bold text-gray-700 mb-1">상품 또는 주제</label>
-            <input
-              value={topic}
-              onChange={(e) => setTopic(e.target.value)}
-              placeholder="예) 의류 쇼핑몰 광고 전략"
-              className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-            />
+            <h3 className="font-bold text-gray-900 text-sm">내 콘텐츠 정보 입력</h3>
+            {questionData && !loading && (
+              <p className="text-xs text-gray-400 mt-0.5">질문 {stepNum} / 최대 5</p>
+            )}
           </div>
-          <div>
-            <label className="block text-xs font-bold text-gray-700 mb-1">타겟</label>
-            <input
-              value={target}
-              onChange={(e) => setTarget(e.target.value)}
-              placeholder="예) 쇼핑몰 초보 대표"
-              className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-            />
-          </div>
-          <div>
-            <label className="block text-xs font-bold text-gray-700 mb-1">내 강점 또는 경험</label>
-            <input
-              value={strength}
-              onChange={(e) => setStrength(e.target.value)}
-              placeholder="예) 1년 만에 월 2억 달성"
-              className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-            />
-          </div>
-        </div>
-        <div className="flex gap-2 mt-1">
-          <button
-            onClick={onClose}
-            className="flex-1 text-sm text-gray-500 hover:text-gray-700 border border-gray-200 hover:bg-gray-50 font-semibold py-2.5 rounded-xl transition-colors"
-          >
-            취소
-          </button>
-          <button
-            onClick={() => onConfirm({ topic: topic.trim(), target: target.trim(), strength: strength.trim() })}
-            className="flex-1 text-sm bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-2.5 rounded-xl transition-colors"
-          >
-            가이드 생성하기
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 transition-colors p-1">
+            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
           </button>
         </div>
+
+        {/* 콘텐츠 */}
+        <div className="flex-1 overflow-y-auto px-5 py-4">
+          {loading ? (
+            <div className="flex flex-col items-center justify-center py-10 gap-3">
+              <div className="w-5 h-5 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
+              <p className="text-xs text-gray-400">{history.length === 0 ? '첫 번째 질문을 준비 중...' : '다음 질문을 준비 중...'}</p>
+            </div>
+          ) : error ? (
+            <div className="flex flex-col gap-3 py-4">
+              <div className="bg-red-50 border border-red-200 text-red-600 text-xs rounded-xl px-4 py-3">{error}</div>
+              <button
+                onClick={() => fetchNext(history)}
+                className="text-sm text-indigo-600 border border-indigo-200 hover:bg-indigo-50 font-semibold py-2.5 rounded-xl transition-colors"
+              >
+                다시 시도
+              </button>
+            </div>
+          ) : questionData ? (
+            <div className="flex flex-col gap-4">
+              {/* 레퍼런스 예시 */}
+              {questionData.referenceExample && (
+                <div className="bg-orange-50 border border-orange-100 rounded-xl px-4 py-3">
+                  <p className="text-[10px] font-bold text-orange-400 uppercase tracking-wider mb-1">레퍼런스 패턴</p>
+                  <p className="text-xs text-orange-800 italic">"{questionData.referenceExample}"</p>
+                </div>
+              )}
+
+              {/* 질문 */}
+              <div className="bg-indigo-50 border border-indigo-100 rounded-xl px-4 py-3">
+                <p className="text-sm font-semibold text-indigo-900 leading-relaxed">{questionData.question}</p>
+              </div>
+
+              {/* 예시 버튼 */}
+              {questionData.examples?.length > 0 && (
+                <div>
+                  <p className="text-[11px] font-bold text-gray-400 mb-2">💡 예시 선택</p>
+                  <div className="flex flex-col gap-1.5">
+                    {questionData.examples.map((ex, i) => (
+                      <button
+                        key={i}
+                        onClick={() => setAnswer(ex)}
+                        className={`text-left text-xs px-3 py-2 rounded-lg border transition-colors ${
+                          answer === ex
+                            ? 'bg-indigo-600 text-white border-indigo-600'
+                            : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'
+                        }`}
+                      >
+                        {ex}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* 직접 입력 */}
+              <div>
+                <label className="block text-[11px] font-bold text-gray-500 mb-1.5">직접 입력</label>
+                <textarea
+                  value={answer}
+                  onChange={(e) => setAnswer(e.target.value)}
+                  placeholder="직접 입력하거나 위 예시를 선택해보세요"
+                  rows={3}
+                  className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm text-gray-800 leading-relaxed resize-none outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent bg-white placeholder-gray-400"
+                  onKeyDown={(e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) handleSubmit(); }}
+                />
+              </div>
+
+              {/* 이전 답변 요약 */}
+              {history.length > 0 && (
+                <div className="bg-gray-50 border border-gray-100 rounded-xl p-3">
+                  <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-2">지금까지 답변</p>
+                  <div className="flex flex-col gap-1.5">
+                    {history.map((h, i) => (
+                      <div key={i} className="flex gap-2 text-xs text-gray-600">
+                        <span className="text-indigo-400 font-bold flex-shrink-0">Q{i + 1}</span>
+                        <span className="truncate">{h.answer}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          ) : null}
+        </div>
+
+        {/* 하단 버튼 */}
+        {!loading && questionData && !error && (
+          <div className="px-5 pb-5 pt-3 border-t border-gray-100 flex-shrink-0">
+            <button
+              onClick={handleSubmit}
+              disabled={!answer.trim()}
+              className="w-full flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-700 disabled:bg-gray-200 disabled:text-gray-400 text-white font-semibold py-3 rounded-xl transition-colors text-sm"
+            >
+              다음
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+              </svg>
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -354,8 +456,7 @@ export default function ScriptPanel({ analysis, referenceText, referenceId, init
   const [saved, setSaved] = useState(false);
   const [toast, setToast] = useState('');
 
-  const [showInfoModal, setShowInfoModal] = useState(false);
-  const [userInfo, setUserInfo] = useState({});
+  const [showQuestionModal, setShowQuestionModal] = useState(false);
 
   useEffect(() => {
     if (!referenceText || !templateData) return;
@@ -462,14 +563,14 @@ export default function ScriptPanel({ analysis, referenceText, referenceId, init
           {toast}
         </div>
       )}
-      {showInfoModal && (
-        <InfoModal
-          initialValues={userInfo}
-          onClose={() => setShowInfoModal(false)}
-          onConfirm={(info) => {
-            setUserInfo(info);
-            setShowInfoModal(false);
-            handleGenerateTemplate(info);
+      {showQuestionModal && (
+        <QuestionModal
+          hookType={analysis?.hookFormulaType || analysis?.hookFormula || ''}
+          empathyPoint={analysis?.hookFormulaDesc || ''}
+          onClose={() => setShowQuestionModal(false)}
+          onComplete={(collectedInfo) => {
+            setShowQuestionModal(false);
+            handleGenerateTemplate(collectedInfo);
           }}
         />
       )}
@@ -500,7 +601,7 @@ export default function ScriptPanel({ analysis, referenceText, referenceId, init
                 {error}
               </div>
               <button
-                onClick={() => setShowInfoModal(true)}
+                onClick={() => setShowQuestionModal(true)}
                 className="flex items-center justify-center gap-2 text-sm font-semibold text-indigo-600 hover:text-indigo-700 border border-indigo-200 hover:bg-indigo-50 px-4 py-2.5 rounded-xl transition-colors"
               >
                 <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -520,7 +621,7 @@ export default function ScriptPanel({ analysis, referenceText, referenceId, init
                 레퍼런스 문장 하나하나를 분석해서<br />내 상황에 맞는 질문을 만들어드려요
               </p>
               <button
-                onClick={() => setShowInfoModal(true)}
+                onClick={() => setShowQuestionModal(true)}
                 className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold px-5 py-2.5 rounded-xl transition-colors text-sm"
               >
                 <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
