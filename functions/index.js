@@ -761,13 +761,20 @@ exports.generateQuestions = onCall(
         ? history.map((h, i) => `Q${i + 1}: ${h.question}\nA${i + 1}: ${h.answer}`).join('\n\n')
         : '';
 
+      const isLastRound = history.length >= 4;
+      const nextInstruction = isLastRound
+        ? '\n지금까지 답변으로 충분한 정보가 모였어. 반드시 isComplete: true로 반환해.'
+        : historyText
+          ? '\n다음 질문을 진행해줘.'
+          : '\n첫 번째 질문을 시작해줘.';
+
       const userContent = `레퍼런스 후킹 유형: ${hookType}
 레퍼런스 공감 포인트: ${empathyPoint || ''}
-${historyText ? `\n지금까지 대화:\n${historyText}\n\n다음 질문을 진행해줘.` : '\n첫 번째 질문을 시작해줘.'}`;
+${historyText ? `\n지금까지 대화:\n${historyText}` : ''}${nextInstruction}`;
 
       const message = await client.messages.create({
         model: MODEL,
-        max_tokens: 500,
+        max_tokens: 1024,
         system: GENERATE_QUESTIONS_PROMPT,
         messages: [{ role: 'user', content: userContent }],
       });

@@ -50,6 +50,10 @@ function QuestionModal({ hookType, empathyPoint, onComplete, onClose }) {
     if (!trimmed || !questionData) return;
     const newHistory = [...history, { question: questionData.question, answer: trimmed }];
     setHistory(newHistory);
+    if (newHistory.length >= 5) {
+      onComplete(questionData.collectedInfo || {});
+      return;
+    }
     await fetchNext(newHistory);
   }
 
