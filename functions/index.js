@@ -488,14 +488,10 @@ exports.refineAnalysis = onCall(
 );
 
 const GENERATE_TEMPLATE_PROMPT = `너는 릴스 스크립트 코치야.
-레퍼런스 대본의 각 문장을 분석해서 문장별로 역할과 심리 효과를 파악하고
-사용자가 자신의 상품으로 같은 구조의 대본을 쓸 수 있도록 질문을 만들어줘.
+레퍼런스 대본의 각 문장을 분석해서 문장별 역할과 심리 효과를 파악하고,
+사용자가 자신의 상품으로 같은 구조의 대본을 쓸 수 있도록 코칭 질문을 만들어줘.
 
-1단계: 후킹 유형 파악
-아래 22개 유형 중 이 대본의 후킹이 어떤 유형인지 먼저 파악해.
-22개 유형에 해당하지 않으면 새로운 유형명을 직접 만들고 isNewType: true 표시.
-반드시 전체 대본을 처음부터 끝까지 읽고 앞 문장만 보고 결론 내지 말 것.
-
+=== 후킹 유형 22개 ===
 유형1: 상황제시형 : 어 이거 나 얘기잖아
 유형2: 결과제시형 : 이거 하면 나도 될까?
 유형3: 군중심리형 : 나만 모르고 있었나?
@@ -519,51 +515,58 @@ const GENERATE_TEMPLATE_PROMPT = `너는 릴스 스크립트 코치야.
 유형21: 의외의인물성과형 : 저런 사람도 됐다고?
 유형22: 발견공유형 : 아는 사람만 안다는 거 나도 알고 싶어
 
-2단계: 공감 포인트 추출
-후킹 유형이 시청자에게 주는 심리적 효과를 2~3줄로 설명해.
+22개에 해당하지 않으면 새 유형명 직접 생성 + isNewType: true.
+유형명 형식 반드시: "유형명 : 시청자 속마음"
 
-3단계: 공감 키워드 추출
-이 대본이 건드리는 핵심 심리/감정 키워드 3~5개.
-(예: 가성비, 예측오류, 군중심리, 전문가신뢰, 사회적증거, 변신욕구, 소유욕, 공감대, 희소성, 손실회피)
+=== 문장별 분석 규칙 ===
 
-4단계: 문장별 코치 생성
-대본의 각 문장에 대해 아래 내용을 작성해.
-sentence는 원문을 절대 수정하지 말고 그대로 써.
+대본의 각 문장마다 steps 배열에 항목 하나씩 추가.
+각 항목의 필드:
+- sentence: 레퍼런스 원문 그대로 (한 글자도 바꾸지 말 것)
+- role: 이 문장이 하는 역할을 짧게 (예: "후킹 문장", "공감대 형성", "가격 반전", "즉각 행동 유도", "신뢰 구축")
+- effect: 시청자가 이 문장에서 느끼는 심리적 효과 (1~2문장)
+- question: 사용자가 자신의 상품으로 이 구조를 활용할 수 있도록 유도하는 질문 (1문장, 쉽고 구체적으로)
+- questionHint: 질문에 대한 예시 답변 ("예) "로 시작)
 
-질문 작성 규칙:
-- 사용자가 자신의 상품/서비스로 대입할 수 있게 구체적으로
-- 답하기 쉽게 — 추상적 질문, 마케팅 전문용어 금지
-- 실제 대본에 쓸 수 있는 내용을 자연스럽게 유도하는 질문
+=== 출력 예시 ===
 
-예시:
-sentence: "바로 에이블리랑 지그재그에 들어가서 상위권 랭킹을 보세요"
-role: "즉각 행동 유도"
-effect: "지금 당장 할 수 있다는 실행 가능성을 제시해 시청자의 행동 전환율을 높임"
-question: "시청자가 지금 당장 취할 수 있는 첫 번째 행동이 뭔가요?"
-questionHint: "예) 신상마켓에서 베스트 상품 확인하기"
+입력 대본: "여러분! 저는 룰루레몬, 알로 못 입어요! 사실 안입어요\n대신 이거 입어요 / 이게 뭐냐구요?\n알로 반의 반값으로 살 수 있어요!"
 
-22개에 해당하지 않는 새 유형 발견 시:
-- 반드시 "유형명 : 시청자 속마음" 형식 유지
-- 시청자가 그 순간 속으로 하는 말, 마케팅 용어 절대 금지
-- isNewType: true 표시
-
-반드시 JSON만 반환:
+출력:
 {
-  "hookType": "유형명 : 시청자 속마음 (예: 브랜드반전형 : 이걸 왜 안 입어?)",
+  "hookType": "브랜드반전형 : 이걸 왜 안 입어?",
   "isNewType": false,
-  "empathyPoint": "공감 포인트 (2~3줄)",
-  "empathyTags": ["키워드1", "키워드2", "키워드3"],
+  "empathyPoint": "고가 브랜드를 안 입는다는 반전 고백으로 예측오류를 만들어 시청자가 멈추게 한다. 이어서 가성비 대안을 제시해 공감과 신뢰를 동시에 얻는 구조다.",
+  "empathyTags": ["예측오류", "가성비", "공감대"],
   "steps": [
     {
-      "sentence": "레퍼런스 원문 문장 (절대 수정 금지)",
-      "role": "이 문장의 역할 (10자 이내, 예: 즉각 행동 유도, 군중심리 자극, 가격 반전, 공감대 형성, 신뢰 구축)",
-      "effect": "시청자가 느끼는 심리적 효과 (1~2문장)",
-      "question": "사용자에게 던지는 질문 (1문장)",
-      "questionHint": "예) 예시 답변 힌트",
-      "userInput": ""
+      "sentence": "여러분! 저는 룰루레몬, 알로 못 입어요! 사실 안입어요",
+      "role": "후킹 문장",
+      "effect": "선망 브랜드를 안 입는다는 반전 고백으로 예측오류를 만들어, 시청자가 '왜?'라는 궁금증을 갖고 영상을 멈추게 한다.",
+      "question": "시청자들이 당연히 쓸 거라 생각하는 선택지가 뭐고, 나는 그걸 왜 안 쓰나요?",
+      "questionHint": "예) 다들 대형 마트 제품을 쓰는데, 저는 소형 브랜드 제품을 써요"
+    },
+    {
+      "sentence": "대신 이거 입어요 / 이게 뭐냐구요?",
+      "role": "호기심 증폭",
+      "effect": "대안을 제시하면서 '이게 뭔데?'라는 궁금증을 극대화해 다음 내용을 끝까지 보게 만든다.",
+      "question": "내 상품을 처음 접하는 사람이 가장 먼저 갖는 의문이나 궁금증은 뭔가요?",
+      "questionHint": "예) 이 소재가 뭐예요? 어디서 살 수 있어요?"
+    },
+    {
+      "sentence": "알로 반의 반값으로 살 수 있어요!",
+      "role": "가격 반전",
+      "effect": "앞서 언급한 고가 브랜드와 가격을 직접 비교해, 기대값 대비 충격적인 가성비를 강조한다.",
+      "question": "내 상품의 가격이나 가성비를 경쟁 제품과 비교하면 어떤 말로 표현할 수 있나요?",
+      "questionHint": "예) 백화점 제품의 30% 가격에 비슷한 품질"
     }
   ]
-}`;
+}
+
+=== 실제 대본 분석 ===
+
+위 예시와 동일한 JSON 구조로, 아래 대본의 모든 문장을 분석해서 steps 배열에 담아줘.
+JSON 외 다른 텍스트는 절대 출력하지 마.`;
 
 const GENERATE_FINAL_SCRIPT_PROMPT = `너는 릴스 스크립트 작성 전문가야.
 사용자가 레퍼런스 대본의 각 문장 구조를 학습하고 질문에 답변했어.
@@ -604,7 +607,7 @@ exports.generateTemplate = onCall(
       const t0 = Date.now();
       const message = await client.messages.create({
         model: MODEL,
-        max_tokens: 4096,
+        max_tokens: 8192,
         system: GENERATE_TEMPLATE_PROMPT,
         messages: [{ role: 'user', content: `대본:\n${script.trim()}` }],
       });
@@ -612,6 +615,8 @@ exports.generateTemplate = onCall(
       console.log('generateTemplate API done —', Date.now() - t0, 'ms | stop_reason:', message.stop_reason, '| raw length:', rawText.length);
       const result = parseJsonFromText(rawText);
       console.log('generateTemplate SUCCESS — steps:', result?.steps?.length, '| hookType:', result?.hookType);
+      console.log('generateTemplate step[0] keys:', Object.keys(result?.steps?.[0] || {}));
+      console.log('generateTemplate step[0] sample:', JSON.stringify(result?.steps?.[0]));
 
       if (result.isNewType && result.hookType) {
         const existing = await db.collection('newHookTypes')
