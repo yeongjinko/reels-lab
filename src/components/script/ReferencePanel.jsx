@@ -544,8 +544,9 @@ export default function ReferencePanel({ onAnalysisDone, onReferenceText, onRefe
         let empathyPoint = null;
         let empathyTags = [];
         let hookType = analysisData.hookFormulaType || null;
+        let templateResult = null;
         try {
-          const templateResult = await generateTemplate(text.trim());
+          templateResult = await generateTemplate(text.trim());
           hookType = templateResult.hookType || hookType;
           empathyPoint = templateResult.empathyPoint || null;
           empathyTags = templateResult.empathyTags || [];

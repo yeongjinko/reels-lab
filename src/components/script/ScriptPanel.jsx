@@ -18,6 +18,7 @@ function tryRestoreStepsDraft(refText, stepsLen) {
 
 function StepCard({ step, index, total, answer, onAnswerChange, onNext, onPrev }) {
   const isLast = index === total - 1;
+  console.log(`[StepCard] index=${index} step:`, step);
 
   return (
     <div className="flex flex-col gap-4">
@@ -310,10 +311,15 @@ export default function ScriptPanel({ analysis, referenceText, referenceId, init
     setSaved(false);
     try {
       const data = await generateTemplate(referenceText);
+      console.log('[ScriptPanel] generateTemplate 응답:', JSON.stringify({
+        hookType: data?.hookType,
+        stepsLen: data?.steps?.length,
+        step0: data?.steps?.[0],
+      }));
       const firstStep = data.steps?.[0];
       // 구 포맷(section/why/how/example) 또는 필수 필드 누락 체크
-      if (!firstStep?.sentence || !firstStep?.question) {
-        console.error('generateTemplate format error — step[0]:', firstStep);
+      if (!firstStep?.sentence || !firstStep?.role || !firstStep?.question) {
+        console.error('[ScriptPanel] format error — step[0]:', firstStep);
         setError('코치 데이터 형식 오류가 발생했습니다. 다시 시도해주세요.');
         return;
       }
