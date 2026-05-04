@@ -723,7 +723,7 @@ exports.generateTemplate = onCall(
       const t0 = Date.now();
       const message = await client.messages.create({
         model: MODEL,
-        max_tokens: 4096,
+        max_tokens: 8192,
         system: GENERATE_TEMPLATE_PROMPT,
         messages: [{ role: 'user', content: userContent }],
       });

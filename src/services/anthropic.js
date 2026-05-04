@@ -9,8 +9,8 @@ const refineSentenceFn = httpsCallable(functions, 'refineSentence');
 const refineAnalysisFn = httpsCallable(functions, 'refineAnalysis');
 const generateContextOptionsFn = httpsCallable(functions, 'generateContextOptions');
 const updateSentencesWithContextFn = httpsCallable(functions, 'updateSentencesWithContext');
-const generateTemplateFn = httpsCallable(functions, 'generateTemplate');
-const generateFinalScriptFn = httpsCallable(functions, 'generateFinalScript');
+const generateTemplateFn = httpsCallable(functions, 'generateTemplate', { timeout: 300000 });
+const generateFinalScriptFn = httpsCallable(functions, 'generateFinalScript', { timeout: 300000 });
 const generateQuestionsFn = httpsCallable(functions, 'generateQuestions');
 
 export async function analyzeReference(text) {
