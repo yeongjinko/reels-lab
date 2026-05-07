@@ -4,18 +4,43 @@ import { db } from '../../firebase/config';
 import { useApp } from '../../App';
 import { generateTemplate, generateSentenceVariants, generateQuestions } from '../../services/anthropic';
 
-// ─── helpers ──────────────────────────────────────────────────────────────────
+// ─── Josa helpers ─────────────────────────────────────────────────────────────
+
+function getLastConsonant(word) {
+  if (!word) return null;
+  const last = word[word.length - 1];
+  const code = last.charCodeAt(0);
+  if (code < 0xAC00 || code > 0xD7A3) return null;
+  return (code - 0xAC00) % 28;
+}
+
+function applyJosa(word, hint) {
+  if (!word) return '';
+  const lc = getLastConsonant(word);
+  if (lc === null) return word;
+  const noFinal = lc === 0;
+  switch (hint) {
+    case '이/가': return word + (noFinal ? '가' : '이');
+    case '을/를': return word + (noFinal ? '를' : '을');
+    case '은/는': return word + (noFinal ? '는' : '은');
+    case '과/와': return word + (noFinal ? '와' : '과');
+    case '으로/로': return word + (noFinal || lc === 8 ? '로' : '으로');
+    default: return word;
+  }
+}
+
+// ─── Template parsing ─────────────────────────────────────────────────────────
 
 function parseTemplateLine(line) {
   const parts = [];
-  const regex = /\[([^\]]+)\]/g;
+  const regex = /\[([^\]:]+)(?::([^\]]+))?\]/g;
   let lastIndex = 0;
   let match;
   while ((match = regex.exec(line)) !== null) {
     if (match.index > lastIndex) {
       parts.push({ type: 'text', content: line.slice(lastIndex, match.index) });
     }
-    parts.push({ type: 'tag', tag: match[1] });
+    parts.push({ type: 'tag', tag: match[1], josa: match[2] || null });
     lastIndex = match.index + match[0].length;
   }
   if (lastIndex < line.length) {
@@ -24,49 +49,59 @@ function parseTemplateLine(line) {
   return parts;
 }
 
-// ─── TagChip ──────────────────────────────────────────────────────────────────
+// ─── TagInputCard ─────────────────────────────────────────────────────────────
 
-function TagChip({ tag, value, info, isEditing, onClick, onChange, onBlur }) {
+function TagInputCard({ tagInfo, value, onChange }) {
   const filled = Boolean(value);
-
-  if (isEditing) {
-    return (
+  return (
+    <div className="mb-3.5">
+      <div className="flex items-center gap-1.5 mb-1">
+        <span className={`text-[11px] font-bold px-1.5 py-0.5 rounded border leading-tight ${
+          filled
+            ? 'bg-green-100 text-green-700 border-green-200'
+            : 'bg-yellow-100 text-yellow-700 border-yellow-200'
+        }`}>
+          {tagInfo.tag}
+        </span>
+        {tagInfo.occurrences > 1 && (
+          <span className="text-[10px] text-gray-400">{tagInfo.occurrences}곳</span>
+        )}
+        {filled && (
+          <svg className="w-3 h-3 text-green-500 ml-auto flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+          </svg>
+        )}
+      </div>
+      <p className="text-[11px] text-gray-500 mb-1 leading-snug">{tagInfo.description}</p>
       <input
-        autoFocus
         value={value || ''}
         onChange={(e) => onChange(e.target.value)}
-        onBlur={onBlur}
-        onKeyDown={(e) => { if (e.key === 'Enter') onBlur(); }}
-        placeholder={tag}
-        className="inline-block border-b-2 border-yellow-500 bg-yellow-50 text-sm px-1 py-0 outline-none mx-0.5"
-        size={Math.max((value || '').length, tag.length, 5) + 2}
+        placeholder={tagInfo.example ? `예) ${tagInfo.example}` : '입력...'}
+        className={`w-full border rounded-lg px-2.5 py-1.5 text-xs outline-none transition-colors placeholder-gray-400 ${
+          filled
+            ? 'border-green-200 bg-green-50 focus:ring-1 focus:ring-green-400'
+            : 'border-gray-200 bg-white focus:ring-1 focus:ring-yellow-400'
+        }`}
       />
-    );
-  }
+    </div>
+  );
+}
+
+// ─── TagDisplay (read-only chip in template) ─────────────────────────────────
+
+function TagDisplay({ tag, josa, value }) {
+  const filled = Boolean(value);
+  const display = filled
+    ? (josa ? applyJosa(value, josa) : value)
+    : (josa ? `[${tag}:${josa}]` : `[${tag}]`);
 
   return (
-    <span className="inline-flex items-center gap-0.5 mx-0.5">
-      <button
-        onClick={onClick}
-        className={`text-sm px-1.5 py-0.5 rounded font-medium transition-colors border ${
-          filled
-            ? 'bg-green-100 text-green-800 hover:bg-green-200 border-green-300'
-            : 'bg-yellow-100 text-yellow-800 hover:bg-yellow-200 border-yellow-300'
-        }`}
-      >
-        {filled ? value : tag}
-      </button>
-      {info && (
-        <span className="group relative inline-flex">
-          <span className="w-3.5 h-3.5 rounded-full bg-gray-200 text-gray-500 text-[9px] flex items-center justify-center font-bold cursor-help select-none">
-            ?
-          </span>
-          <span className="pointer-events-none absolute hidden group-hover:flex flex-col bottom-full left-0 mb-1 w-44 bg-gray-800 text-white text-xs rounded-lg p-2 z-50 shadow-lg">
-            <span>{info.description}</span>
-            {info.example && <span className="text-gray-300 mt-0.5">예) {info.example}</span>}
-          </span>
-        </span>
-      )}
+    <span className={`mx-0.5 text-sm font-medium ${
+      filled
+        ? 'text-green-800'
+        : 'text-yellow-600 bg-yellow-50 border border-yellow-200 rounded-sm px-0.5'
+    }`}>
+      {display}
     </span>
   );
 }
@@ -88,29 +123,22 @@ function SentenceEditPanel({ sentence, filledTags, onApply, onClose, onReset, ha
       const data = await generateSentenceVariants(sentence.text, sentence.role, sentence.effect, filledTags);
       setVariants(data.variants || []);
     } catch {
-      setError('변형 생성 중 오류가 발생했습니다.');
+      setError('추천 표현 생성 중 오류가 발생했습니다.');
     } finally {
       setLoading(false);
     }
   }
 
-  function applyText(text) {
-    onApply(text);
-  }
-
   return (
     <div className="mt-1 mb-2 bg-indigo-50 border border-indigo-200 rounded-xl p-3">
       <div className="flex items-center justify-between mb-2.5">
-        <div>
-          <span className="text-[11px] font-bold text-indigo-700">이 문장의 역할</span>
-          <span className="ml-1.5 text-xs text-indigo-900">{sentence.role}</span>
+        <div className="flex items-center gap-1.5">
+          <span className="text-[11px] font-bold text-indigo-700">역할</span>
+          <span className="text-xs text-indigo-900">{sentence.role}</span>
         </div>
         <div className="flex items-center gap-1.5">
           {hasOverride && (
-            <button
-              onClick={onReset}
-              className="text-[11px] text-gray-400 hover:text-gray-600 border border-gray-200 rounded px-2 py-0.5"
-            >
+            <button onClick={onReset} className="text-[11px] text-gray-400 hover:text-gray-600 border border-gray-200 rounded px-2 py-0.5">
               원래대로
             </button>
           )}
@@ -125,18 +153,18 @@ function SentenceEditPanel({ sentence, filledTags, onApply, onClose, onReset, ha
       {loading ? (
         <div className="flex items-center gap-2 py-2">
           <div className="w-4 h-4 border-2 border-indigo-400 border-t-transparent rounded-full animate-spin" />
-          <span className="text-xs text-gray-400">AI 추천 변형 생성 중...</span>
+          <span className="text-xs text-gray-400">AI 추천 표현 생성 중...</span>
         </div>
       ) : error ? (
         <p className="text-xs text-red-500 mb-2">{error}</p>
       ) : variants.length > 0 ? (
         <div className="mb-3">
-          <p className="text-[11px] font-bold text-gray-400 mb-1.5">AI 추천 변형</p>
+          <p className="text-[11px] font-bold text-gray-400 mb-1.5">AI 추천 표현</p>
           <div className="flex flex-col gap-1.5">
             {variants.map((v, i) => (
               <button
                 key={i}
-                onClick={() => applyText(v)}
+                onClick={() => onApply(v)}
                 className="text-left text-xs text-indigo-800 bg-white hover:bg-indigo-100 border border-indigo-200 rounded-lg px-3 py-2 transition-colors"
               >
                 {v}
@@ -153,13 +181,13 @@ function SentenceEditPanel({ sentence, filledTags, onApply, onClose, onReset, ha
             value={customText}
             onChange={(e) => setCustomText(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === 'Enter' && customText.trim()) { applyText(customText.trim()); setCustomText(''); }
+              if (e.key === 'Enter' && customText.trim()) { onApply(customText.trim()); setCustomText(''); }
             }}
             placeholder="직접 문장을 입력하세요"
             className="flex-1 border border-gray-200 rounded-lg px-3 py-2 text-xs outline-none focus:ring-2 focus:ring-indigo-400"
           />
           <button
-            onClick={() => { if (customText.trim()) { applyText(customText.trim()); setCustomText(''); } }}
+            onClick={() => { if (customText.trim()) { onApply(customText.trim()); setCustomText(''); } }}
             disabled={!customText.trim()}
             className="px-3 py-1.5 bg-indigo-600 text-white text-xs font-semibold rounded-lg hover:bg-indigo-700 disabled:bg-gray-200 disabled:text-gray-400"
           >
@@ -246,14 +274,11 @@ function QuestionModal({ hookType, empathyPoint, onComplete, onClose }) {
                 <p className="text-sm font-semibold text-amber-800 mb-1.5">이 레퍼런스는 다른 상황에 맞아요</p>
                 <p className="text-xs text-amber-700 leading-relaxed">{empathyPoint || '이 구조는 특정 후킹 유형에 맞게 설계됐어요.'}</p>
               </div>
-              <p className="text-xs text-gray-500 leading-relaxed">내 상황에 맞는 다른 레퍼런스를 찾아보시겠어요?</p>
+              <p className="text-xs text-gray-500">내 상황에 맞는 다른 레퍼런스를 찾아보시겠어요?</p>
               <button
                 onClick={onClose}
-                className="w-full flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-3 rounded-xl transition-colors text-sm"
+                className="w-full flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-3 rounded-xl text-sm"
               >
-                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7v8a2 2 0 002 2h6M8 7V5a2 2 0 012-2h4.586a1 1 0 01.707.293l4.414 4.414a1 1 0 01.293.707V15a2 2 0 01-2 2h-2M8 7H6a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2v-2" />
-                </svg>
                 레퍼런스 라이브러리 보기
               </button>
             </div>
@@ -262,10 +287,7 @@ function QuestionModal({ hookType, empathyPoint, onComplete, onClose }) {
           {phase === 'error' && (
             <div className="flex flex-col gap-3 py-4">
               <div className="bg-red-50 border border-red-200 text-red-600 text-xs rounded-xl px-4 py-3">{error}</div>
-              <button
-                onClick={loadSuitableFor}
-                className="text-sm text-indigo-600 border border-indigo-200 hover:bg-indigo-50 font-semibold py-2.5 rounded-xl transition-colors"
-              >
+              <button onClick={loadSuitableFor} className="text-sm text-indigo-600 border border-indigo-200 hover:bg-indigo-50 font-semibold py-2.5 rounded-xl">
                 다시 시도
               </button>
             </div>
@@ -287,7 +309,6 @@ export default function ScriptPanel({ analysis, referenceText, referenceId, init
   const [showQuestionModal, setShowQuestionModal] = useState(false);
 
   const [tagValues, setTagValues] = useState({});
-  const [editingTagKey, setEditingTagKey] = useState(null); // { lineIndex, partIndex }
   const [sentenceOverrides, setSentenceOverrides] = useState({});
   const [editingSentenceIndex, setEditingSentenceIndex] = useState(null);
 
@@ -296,7 +317,6 @@ export default function ScriptPanel({ analysis, referenceText, referenceId, init
   const [saved, setSaved] = useState(false);
   const [toast, setToast] = useState('');
 
-  // Load initial template (new format)
   useEffect(() => {
     if (!referenceText || !analysis || !initialTemplateData || templateData) return;
     if (initialTemplateData.template != null) {
@@ -309,14 +329,42 @@ export default function ScriptPanel({ analysis, referenceText, referenceId, init
     [templateData]
   );
 
+  // Recompute occurrences from actual template (more accurate than AI-reported)
+  const tagOccurrences = useMemo(() => {
+    const counts = {};
+    for (const line of templateLines) {
+      for (const m of [...line.matchAll(/\[([^\]:]+)(?::[^\]]+)?\]/g)]) {
+        counts[m[1]] = (counts[m[1]] || 0) + 1;
+      }
+    }
+    return counts;
+  }, [templateLines]);
+
+  const tags = useMemo(() => {
+    if (!templateData?.tags) return [];
+    return templateData.tags.map((t) => ({
+      ...t,
+      occurrences: tagOccurrences[t.tag] || 1,
+    }));
+  }, [templateData, tagOccurrences]);
+
   const completedScript = useMemo(() => {
     return templateLines.map((line, i) => {
       if (sentenceOverrides[i] !== undefined) return sentenceOverrides[i];
-      return line.replace(/\[([^\]]+)\]/g, (_, tag) => tagValues[tag] || `[${tag}]`);
+      return line.replace(/\[([^\]:]+)(?::([^\]]+))?\]/g, (_, tag, josa) => {
+        const val = tagValues[tag] || '';
+        if (!val) return `[${tag}]`;
+        return josa ? applyJosa(val, josa) : val;
+      });
     }).join('\n');
   }, [templateLines, tagValues, sentenceOverrides]);
 
   const hasUnfilledTags = useMemo(() => /\[[^\]]+\]/.test(completedScript), [completedScript]);
+
+  const filledCount = useMemo(
+    () => tags.filter((t) => Boolean(tagValues[t.tag])).length,
+    [tags, tagValues]
+  );
 
   async function handleGenerateTemplate() {
     if (!referenceText || loading) return;
@@ -325,7 +373,6 @@ export default function ScriptPanel({ analysis, referenceText, referenceId, init
     setTemplateData(null);
     setTagValues({});
     setSentenceOverrides({});
-    setEditingTagKey(null);
     setEditingSentenceIndex(null);
     setSaved(false);
     try {
@@ -342,16 +389,9 @@ export default function ScriptPanel({ analysis, referenceText, referenceId, init
     }
   }
 
-  function handleTagClick(lineIndex, partIndex) {
-    setEditingTagKey({ lineIndex, partIndex });
-  }
-
   function handleTagChange(tagName, value) {
     setTagValues((prev) => ({ ...prev, [tagName]: value }));
-  }
-
-  function handleTagBlur() {
-    setEditingTagKey(null);
+    setEditingSentenceIndex(null);
   }
 
   function handleSentenceEdit(lineIndex) {
@@ -422,69 +462,113 @@ export default function ScriptPanel({ analysis, referenceText, referenceId, init
       )}
 
       <div className="flex flex-col h-full">
+        {/* Header */}
         <div className="p-5 border-b border-gray-100 flex-shrink-0">
           <h2 className="font-bold text-gray-900 mb-0.5">스크립트 작성</h2>
           <p className="text-xs text-gray-500">레퍼런스 구조를 템플릿으로 바꿔 내 상품을 대입해보세요</p>
         </div>
 
-        <div className="flex-1 overflow-y-auto p-5">
-          {!analysis ? (
-            <div className="flex flex-col items-center justify-center h-48 text-center">
-              <div className="w-12 h-12 bg-amber-50 rounded-2xl flex items-center justify-center mb-3">
-                <svg className="w-6 h-6 text-amber-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-                </svg>
+        {/* Pre-template states: single column */}
+        {!templateData ? (
+          <div className="flex-1 overflow-y-auto p-5">
+            {!analysis ? (
+              <div className="flex flex-col items-center justify-center h-48 text-center">
+                <div className="w-12 h-12 bg-amber-50 rounded-2xl flex items-center justify-center mb-3">
+                  <svg className="w-6 h-6 text-amber-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                  </svg>
+                </div>
+                <p className="text-sm font-medium text-gray-500">먼저 왼쪽에서 레퍼런스 대본을 분석해주세요</p>
               </div>
-              <p className="text-sm font-medium text-gray-500">먼저 왼쪽에서 레퍼런스 대본을 분석해주세요</p>
-            </div>
-          ) : loading ? (
-            <div className="flex flex-col items-center justify-center h-48 gap-2">
-              <div className="w-5 h-5 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
-              <p className="text-xs text-gray-400">단어 치환 템플릿 생성 중...</p>
-            </div>
-          ) : error ? (
-            <div className="flex flex-col gap-3">
-              <div className="bg-red-50 border border-red-200 text-red-600 text-sm rounded-xl px-4 py-3">{error}</div>
-              <button
-                onClick={() => setShowQuestionModal(true)}
-                className="flex items-center justify-center gap-2 text-sm font-semibold text-indigo-600 border border-indigo-200 hover:bg-indigo-50 px-4 py-2.5 rounded-xl transition-colors"
-              >
-                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                </svg>
-                다시 시도
-              </button>
-            </div>
-          ) : !templateData ? (
-            <div className="flex flex-col items-center justify-center h-56 text-center px-4">
-              <div className="w-14 h-14 bg-indigo-50 rounded-2xl flex items-center justify-center mb-4">
-                <svg className="w-7 h-7 text-indigo-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" />
-                </svg>
+            ) : loading ? (
+              <div className="flex flex-col items-center justify-center h-48 gap-2">
+                <div className="w-5 h-5 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
+                <p className="text-xs text-gray-400">단어 치환 템플릿 생성 중...</p>
               </div>
-              <p className="text-xs text-gray-400 mb-4 leading-relaxed">
-                레퍼런스 구조를 분석해서<br />빈칸 채우기 템플릿을 만들어드려요
-              </p>
-              <button
-                onClick={() => setShowQuestionModal(true)}
-                className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold px-5 py-2.5 rounded-xl transition-colors text-sm"
-              >
-                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
-                </svg>
-                코치 가이드 생성하기
-              </button>
+            ) : error ? (
+              <div className="flex flex-col gap-3">
+                <div className="bg-red-50 border border-red-200 text-red-600 text-sm rounded-xl px-4 py-3">{error}</div>
+                <button
+                  onClick={() => setShowQuestionModal(true)}
+                  className="flex items-center justify-center gap-2 text-sm font-semibold text-indigo-600 border border-indigo-200 hover:bg-indigo-50 px-4 py-2.5 rounded-xl"
+                >
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                  </svg>
+                  다시 시도
+                </button>
+              </div>
+            ) : (
+              <div className="flex flex-col items-center justify-center h-56 text-center px-4">
+                <div className="w-14 h-14 bg-indigo-50 rounded-2xl flex items-center justify-center mb-4">
+                  <svg className="w-7 h-7 text-indigo-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" />
+                  </svg>
+                </div>
+                <p className="text-xs text-gray-400 mb-4 leading-relaxed">
+                  레퍼런스 구조를 분석해서<br />빈칸 채우기 템플릿을 만들어드려요
+                </p>
+                <button
+                  onClick={() => setShowQuestionModal(true)}
+                  className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold px-5 py-2.5 rounded-xl text-sm"
+                >
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+                  </svg>
+                  코치 가이드 생성하기
+                </button>
+              </div>
+            )}
+          </div>
+        ) : (
+          /* Template editor: two-column layout */
+          <div className="flex flex-1 overflow-hidden">
+
+            {/* Left: Tag input panel */}
+            <div className="w-44 flex-shrink-0 border-r border-gray-100 overflow-y-auto flex flex-col">
+              <div className="p-3.5 flex-1">
+                <div className="flex items-center justify-between mb-3">
+                  <p className="text-[11px] font-bold text-gray-400 uppercase tracking-wider">태그 입력</p>
+                  <span className="text-[10px] text-gray-400 font-medium">
+                    {filledCount}/{tags.length}
+                  </span>
+                </div>
+
+                {tags.map((tagInfo) => (
+                  <TagInputCard
+                    key={tagInfo.tag}
+                    tagInfo={tagInfo}
+                    value={tagValues[tagInfo.tag] || ''}
+                    onChange={(val) => handleTagChange(tagInfo.tag, val)}
+                  />
+                ))}
+              </div>
+
+              {/* Regenerate */}
+              <div className="p-3 border-t border-gray-100 flex-shrink-0">
+                <button
+                  onClick={() => setShowQuestionModal(true)}
+                  className="w-full flex items-center justify-center gap-1.5 text-[11px] text-gray-400 hover:text-gray-600 border border-gray-200 rounded-lg py-2 transition-colors"
+                >
+                  <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                  </svg>
+                  새로 생성
+                </button>
+              </div>
             </div>
-          ) : (
-            <div className="flex flex-col gap-5">
+
+            {/* Right: Template display + preview + actions */}
+            <div className="flex-1 overflow-y-auto p-4">
+
               {/* Hook type badge */}
-              <div className="bg-orange-50 border border-orange-200 rounded-xl p-4">
-                <div className="flex items-center gap-2 mb-2">
-                  <svg className="w-4 h-4 text-orange-500 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <div className="bg-orange-50 border border-orange-200 rounded-xl p-3.5 mb-4">
+                <div className="flex items-center gap-2 mb-1.5">
+                  <svg className="w-3.5 h-3.5 text-orange-500 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" />
                   </svg>
                   {templateData.hookType && (
-                    <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full ${
+                    <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${
                       templateData.isNewType ? 'bg-amber-100 text-amber-700' : 'bg-orange-100 text-orange-600'
                     }`}>
                       {templateData.isNewType ? '✦ ' : ''}{templateData.hookType}
@@ -495,10 +579,8 @@ export default function ScriptPanel({ analysis, referenceText, referenceId, init
               </div>
 
               {/* Template lines */}
-              <div className="bg-white border border-gray-200 rounded-xl p-4">
-                <p className="text-[11px] font-bold text-gray-400 uppercase tracking-wider mb-3">
-                  템플릿 · 노란 단어를 클릭해서 채워보세요
-                </p>
+              <div className="bg-white border border-gray-200 rounded-xl p-3 mb-4">
+                <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-2.5">템플릿</p>
                 <div className="flex flex-col gap-0.5">
                   {templateLines.map((line, lineIndex) => {
                     const sentenceData = templateData.sentences[lineIndex];
@@ -508,30 +590,22 @@ export default function ScriptPanel({ analysis, referenceText, referenceId, init
 
                     return (
                       <div key={lineIndex}>
-                        <div className="flex items-center gap-2 py-1 group min-h-[32px]">
+                        <div className="flex items-center gap-1.5 py-1 group min-h-[28px]">
                           <div className="flex-1 text-sm text-gray-800 leading-relaxed">
                             {hasOverride ? (
-                              <span className="bg-indigo-50 text-indigo-800 text-sm px-1.5 py-0.5 rounded">
+                              <span className="bg-indigo-50 text-indigo-800 px-1.5 py-0.5 rounded text-sm">
                                 {sentenceOverrides[lineIndex]}
                               </span>
                             ) : (
                               <span>
-                                {parts.map((part, partIdx) => {
-                                  if (part.type === 'text') return <span key={partIdx}>{part.content}</span>;
-                                  const isEditing =
-                                    editingTagKey?.lineIndex === lineIndex &&
-                                    editingTagKey?.partIndex === partIdx;
-                                  const tagInfo = templateData.tags.find((t) => t.tag === part.tag);
+                                {parts.map((part, pIdx) => {
+                                  if (part.type === 'text') return <span key={pIdx}>{part.content}</span>;
                                   return (
-                                    <TagChip
-                                      key={partIdx}
+                                    <TagDisplay
+                                      key={pIdx}
                                       tag={part.tag}
+                                      josa={part.josa}
                                       value={tagValues[part.tag] || ''}
-                                      info={tagInfo}
-                                      isEditing={isEditing}
-                                      onClick={() => handleTagClick(lineIndex, partIdx)}
-                                      onChange={(val) => handleTagChange(part.tag, val)}
-                                      onBlur={handleTagBlur}
                                     />
                                   );
                                 })}
@@ -541,13 +615,13 @@ export default function ScriptPanel({ analysis, referenceText, referenceId, init
                           {sentenceData && (
                             <button
                               onClick={() => handleSentenceEdit(lineIndex)}
-                              className={`flex-shrink-0 text-[10px] px-1.5 py-0.5 rounded border transition-colors whitespace-nowrap ${
+                              className={`flex-shrink-0 text-[9px] px-1.5 py-0.5 rounded border transition-all whitespace-nowrap ${
                                 isEditingThis
-                                  ? 'bg-indigo-100 text-indigo-700 border-indigo-300'
-                                  : 'bg-gray-50 text-gray-400 border-gray-200 hover:bg-gray-100 hover:text-gray-600'
+                                  ? 'bg-indigo-100 text-indigo-700 border-indigo-300 opacity-100'
+                                  : 'bg-gray-50 text-gray-400 border-gray-200 hover:bg-gray-100 hover:text-gray-600 opacity-50 group-hover:opacity-100'
                               }`}
                             >
-                              {isEditingThis ? '닫기' : '문장 수정'}
+                              {isEditingThis ? '닫기' : '다르게'}
                             </button>
                           )}
                         </div>
@@ -569,9 +643,9 @@ export default function ScriptPanel({ analysis, referenceText, referenceId, init
               </div>
 
               {/* Completed script preview */}
-              <div className="bg-gray-50 border border-gray-200 rounded-xl p-4">
+              <div className="bg-gray-50 border border-gray-200 rounded-xl p-3 mb-4">
                 <div className="flex items-center justify-between mb-2">
-                  <p className="text-[11px] font-bold text-gray-400 uppercase tracking-wider">완성된 대본 미리보기</p>
+                  <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">완성된 대본 미리보기</p>
                   {hasUnfilledTags && (
                     <span className="text-[10px] text-amber-500 font-medium">빈 태그 있음</span>
                   )}
@@ -624,8 +698,8 @@ export default function ScriptPanel({ analysis, referenceText, referenceId, init
                 </button>
               </div>
             </div>
-          )}
-        </div>
+          </div>
+        )}
       </div>
     </>
   );
