@@ -361,6 +361,7 @@ export default function ScriptPanel({ analysis, referenceText, referenceId, init
   // Full edit mode
   const [isFullEditMode, setIsFullEditMode] = useState(false);
   const [fullEditText, setFullEditText] = useState('');
+  const [editedTemplateLines, setEditedTemplateLines] = useState({});
 
   // Tag suggestions
   const [suggestingTagKey, setSuggestingTagKey] = useState(null);
@@ -385,13 +386,18 @@ export default function ScriptPanel({ analysis, referenceText, referenceId, init
     [templateData]
   );
 
+  const effectiveTemplateLines = useMemo(
+    () => templateLines.map((line, i) => editedTemplateLines[i] ?? line),
+    [templateLines, editedTemplateLines]
+  );
+
   const totalTagSlots = useMemo(() => {
     let count = 0;
-    for (const line of templateLines) {
+    for (const line of effectiveTemplateLines) {
       count += [...line.matchAll(/\[([^\]:]+)(?::[^\]]+)?\]/g)].length;
     }
     return count;
-  }, [templateLines]);
+  }, [effectiveTemplateLines]);
 
   const filledCount = useMemo(
     () => Object.values(tagValues).filter(Boolean).length,
@@ -399,7 +405,7 @@ export default function ScriptPanel({ analysis, referenceText, referenceId, init
   );
 
   const templateCompletedScript = useMemo(() => {
-    return templateLines.map((line, lineIndex) => {
+    return effectiveTemplateLines.map((line, lineIndex) => {
       if (sentenceOverrides[lineIndex] !== undefined) return sentenceOverrides[lineIndex];
       let tagIdx = 0;
       return line.replace(/\[([^\]:]+)(?::([^\]]+))?\]/g, (_, tag, josa) => {
@@ -409,7 +415,7 @@ export default function ScriptPanel({ analysis, referenceText, referenceId, init
         return josa ? applyJosa(val, josa) : val;
       });
     }).join('\n');
-  }, [templateLines, tagValues, sentenceOverrides]);
+  }, [effectiveTemplateLines, tagValues, sentenceOverrides]);
 
   const completedScript = isFullEditMode ? fullEditText : templateCompletedScript;
 
@@ -418,7 +424,7 @@ export default function ScriptPanel({ analysis, referenceText, referenceId, init
   // tagName → value map for SentenceEditPanel context
   const filledTagsByName = useMemo(() => {
     const result = {};
-    templateLines.forEach((line, lineIndex) => {
+    effectiveTemplateLines.forEach((line, lineIndex) => {
       let tagIdx = 0;
       for (const m of [...line.matchAll(/\[([^\]:]+)(?::[^\]]+)?\]/g)]) {
         const key = `${lineIndex}-${tagIdx++}`;
@@ -427,7 +433,7 @@ export default function ScriptPanel({ analysis, referenceText, referenceId, init
       }
     });
     return result;
-  }, [templateLines, tagValues]);
+  }, [effectiveTemplateLines, tagValues]);
 
   async function handleGenerateTemplate() {
     if (!referenceText || loading) return;
@@ -440,6 +446,7 @@ export default function ScriptPanel({ analysis, referenceText, referenceId, init
     setEditingSentenceIndex(null);
     setIsFullEditMode(false);
     setFullEditText('');
+    setEditedTemplateLines({});
     setSuggestingTagKey(null);
     setSuggestions([]);
     setSaved(false);
@@ -499,13 +506,12 @@ export default function ScriptPanel({ analysis, referenceText, referenceId, init
   }
 
   function handleExitFullEdit() {
-    // Map edited lines back to sentenceOverrides
     const lines = fullEditText.split('\n');
-    const newOverrides = {};
+    const newEdited = {};
     templateLines.forEach((_, i) => {
-      if (lines[i] !== undefined) newOverrides[i] = lines[i];
+      if (lines[i] !== undefined) newEdited[i] = lines[i];
     });
-    setSentenceOverrides(newOverrides);
+    setEditedTemplateLines(newEdited);
     setIsFullEditMode(false);
   }
 
@@ -712,11 +718,11 @@ export default function ScriptPanel({ analysis, referenceText, referenceId, init
                 />
               ) : (
                 <div className="flex flex-col gap-0.5">
-                  {templateLines.map((line, lineIndex) => {
+                  {effectiveTemplateLines.map((line, lineIndex) => {
                     const sentenceData = templateData.sentences[lineIndex];
                     const hasOverride = sentenceOverrides[lineIndex] !== undefined;
                     const isEditingThis = editingSentenceIndex === lineIndex;
-                    const parts = parseTemplateLine(line);
+                    const parts = parseTemplateLine(hasOverride ? sentenceOverrides[lineIndex] : line);
                     const scriptLines = templateCompletedScript.split('\n');
                     const prevSentence = scriptLines[lineIndex - 1] || '';
                     const nextSentence = scriptLines[lineIndex + 1] || '';
@@ -727,31 +733,25 @@ export default function ScriptPanel({ analysis, referenceText, referenceId, init
                       <div key={lineIndex}>
                         <div className="flex items-center gap-1.5 py-1 group min-h-[28px]">
                           <div className="flex-1 text-sm text-gray-800 leading-relaxed">
-                            {hasOverride ? (
-                              <span className="bg-indigo-50 text-indigo-800 px-1.5 py-0.5 rounded text-sm">
-                                {sentenceOverrides[lineIndex]}
-                              </span>
-                            ) : (
-                              <span>
-                                {parts.map((part, pIdx) => {
-                                  if (part.type === 'text') return <span key={pIdx}>{part.content}</span>;
-                                  const currentTagIdx = tagIdxInLine++;
-                                  const key = `${lineIndex}-${currentTagIdx}`;
-                                  return (
-                                    <InlineTagEdit
-                                      key={pIdx}
-                                      tag={part.tag}
-                                      josa={part.josa}
-                                      value={tagValues[key] || ''}
-                                      isEditing={editingTagKey === key}
-                                      onStartEdit={() => { setEditingTagKey(key); setSuggestingTagKey(null); setSuggestions([]); }}
-                                      onSave={(val) => handleTagSave(key, val)}
-                                      onRequestSuggestion={() => handleRequestSuggestion(key, part.tag)}
-                                    />
-                                  );
-                                })}
-                              </span>
-                            )}
+                            <span className={hasOverride ? 'bg-indigo-50 text-indigo-800 px-1.5 py-0.5 rounded text-sm' : undefined}>
+                              {parts.map((part, pIdx) => {
+                                if (part.type === 'text') return <span key={pIdx}>{part.content}</span>;
+                                const currentTagIdx = tagIdxInLine++;
+                                const key = `${lineIndex}-${currentTagIdx}`;
+                                return (
+                                  <InlineTagEdit
+                                    key={pIdx}
+                                    tag={part.tag}
+                                    josa={part.josa}
+                                    value={tagValues[key] || ''}
+                                    isEditing={editingTagKey === key}
+                                    onStartEdit={() => { setEditingTagKey(key); setSuggestingTagKey(null); setSuggestions([]); }}
+                                    onSave={(val) => handleTagSave(key, val)}
+                                    onRequestSuggestion={() => handleRequestSuggestion(key, part.tag)}
+                                  />
+                                );
+                              })}
+                            </span>
                           </div>
                           {sentenceData && (
                             <button
