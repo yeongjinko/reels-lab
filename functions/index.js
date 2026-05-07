@@ -924,12 +924,13 @@ const GENERATE_SENTENCE_VARIANTS_PROMPT = `너는 릴스 스크립트 작성 전
 { "variants": ["변형1", "변형2", "변형3"] }`;
 
 const SUGGEST_TAG_VALUE_PROMPT = `너는 릴스 대본 전문가야.
-아래 전체 대본을 먼저 완전히 읽고 이해해.
 
-순서대로 판단해:
-1. 이 대본 전체가 말하려는 게 뭔지
-2. 이 태그가 있는 문장이 전체에서 어떤 역할인지
-3. 이 역할을 가장 잘 수행하는 값이 뭔지
+이 순서로 판단해:
+1. 전체 대본을 처음부터 끝까지 읽어
+2. 표시된 문장이 전체 흐름에서 어떤 역할을 하는지 파악해
+3. 이 자리([태그])에 뭐가 들어가야 그 역할을 가장 잘 수행하는지 판단해
+4. 추천값 3개 생성
+5. 맨 마지막에 태그명은 참고만 해 — 태그명에 끌려다니지 말고 맥락이 먼저야
 
 추천 원칙:
 - 전체 흐름을 방해하지 않는 값
@@ -937,13 +938,12 @@ const SUGGEST_TAG_VALUE_PROMPT = `너는 릴스 대본 전문가야.
 - 트렌드보다 맥락이 항상 우선
 - 역할에 안 맞으면 트렌디해도 추천 금지
 
-웹서치로 현재 트렌드 참고는 하되
-맥락에 맞을 때만 활용.
+웹서치로 현재 트렌드 참고는 하되 맥락에 맞을 때만 활용.
 
 반드시 JSON만 반환:
 {
   "contextUnderstanding": "전체 맥락 이해 한 줄 요약",
-  "tagRole": "이 태그의 역할",
+  "tagRole": "이 자리의 역할",
   "suggestions": [
     {
       "value": "추천값",
@@ -995,13 +995,16 @@ exports.suggestTagValue = onCall(
     if (!tagName) throw new HttpsError('invalid-argument', '태그명이 필요합니다.');
 
     const client = new Anthropic({ apiKey: anthropicApiKey.value() });
-    const userContent = `전체 대본: ${fullTemplate || ''}
-레퍼런스 공감 포인트: ${empathyPoint || ''}
-태그명: ${tagName}
-태그 설명: ${tagDescription || ''}
-이 태그가 있는 문장: ${sentence || ''}
+    const userContent = `전체 대본:
+${fullTemplate || ''}
 
-위 정보를 바탕으로 [${tagName}]에 들어갈 가장 효과적인 값 3개를 추천해줘.`;
+레퍼런스 공감 포인트: ${empathyPoint || ''}
+
+이 문장에서 [태그] 자리에 들어갈 값을 추천해줘:
+"${sentence || ''}"
+${tagDescription ? `\n태그 설명: ${tagDescription}` : ''}
+
+(참고: 이 태그의 이름은 "${tagName}"이야)`;
 
     const messages = [{ role: 'user', content: userContent }];
     const tools = [{ type: 'web_search_20250305', name: 'web_search' }];
