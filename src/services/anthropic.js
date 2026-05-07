@@ -13,6 +13,7 @@ const generateTemplateFn = httpsCallable(functions, 'generateTemplate', { timeou
 const generateFinalScriptFn = httpsCallable(functions, 'generateFinalScript', { timeout: 300000 });
 const generateQuestionsFn = httpsCallable(functions, 'generateQuestions');
 const generateSentenceVariantsFn = httpsCallable(functions, 'generateSentenceVariants');
+const suggestTagValueFn = httpsCallable(functions, 'suggestTagValue');
 
 export async function analyzeReference(text) {
   const result = await analyzeScriptFn({ text });
@@ -59,7 +60,12 @@ export async function generateQuestions(hookType, empathyPoint, history = []) {
   return result.data.data;
 }
 
-export async function generateSentenceVariants(sentence, role, effect, filledTags = {}) {
-  const result = await generateSentenceVariantsFn({ sentence, role, effect, filledTags });
+export async function generateSentenceVariants(sentence, role, effect, filledTags = {}, fullTemplate = '', prevSentence = '', nextSentence = '') {
+  const result = await generateSentenceVariantsFn({ sentence, role, effect, filledTags, fullTemplate, prevSentence, nextSentence });
   return result.data.data; // { variants: [] }
+}
+
+export async function suggestTagValue(tagName, tagDescription, fullTemplate, empathyPoint) {
+  const result = await suggestTagValueFn({ tagName, tagDescription, fullTemplate, empathyPoint });
+  return result.data.data; // { suggestions: [{ value, reason }] }
 }

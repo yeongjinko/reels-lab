@@ -902,6 +902,8 @@ ${sentenceSummary}`,
 const GENERATE_SENTENCE_VARIANTS_PROMPT = `너는 릴스 스크립트 작성 전문가야.
 주어진 문장의 단어나 표현만 살짝 바꾼 변형 3개를 만들어줘.
 
+아래 전체 대본 맥락을 반드시 먼저 파악하고 해당 문장의 대안 표현을 추천해줘.
+
 규칙:
 1. 원문 문장의 아래 요소를 반드시 유지:
    - 문장 길이 (비슷한 길이)
@@ -910,17 +912,31 @@ const GENERATE_SENTENCE_VARIANTS_PROMPT = `너는 릴스 스크립트 작성 전
    - 리액션/감탄사 있으면 유지
 2. 단어나 표현만 살짝 바꾸는 수준으로만 추천
 3. 완전히 다른 문장 금지
-4. 자연스러운 구어체/릴스 말투
-5. 사용자 태그 정보(상품/타겟/특징)가 있으면 그 내용을 반영
+4. 전체 흐름에서 이 문장의 역할 유지
+5. 앞뒤 문장과 자연스럽게 연결되는 표현
+6. 사용자가 입력한 태그값 반영
 
 반드시 JSON만 반환:
 { "variants": ["변형1", "변형2", "변형3"] }`;
+
+const SUGGEST_TAG_VALUE_PROMPT = `너는 릴스 스크립트 작성 전문가야.
+주어진 태그에 들어갈 가장 효과적인 값을 3개 추천해줘.
+
+웹서치로 현재 트렌드를 참고해서 실제로 효과적인 값을 추천해줘.
+단순한 예시가 아니라 실제 시장에서 통하는 값이어야 해.
+
+반드시 JSON으로만 반환:
+{
+  "suggestions": [
+    { "value": "추천값", "reason": "이 값을 추천하는 이유 (15자 이내)" }
+  ]
+}`;
 
 exports.generateSentenceVariants = onCall(
   { secrets: [anthropicApiKey], cors: true },
   async (request) => {
     if (!request.auth) throw new HttpsError('unauthenticated', '로그인이 필요합니다.');
-    const { sentence, role, effect, filledTags } = request.data;
+    const { sentence, role, effect, filledTags, fullTemplate, prevSentence, nextSentence } = request.data;
     if (!sentence || !role) throw new HttpsError('invalid-argument', '필수 값이 누락됐습니다.');
 
     const client = new Anthropic({ apiKey: anthropicApiKey.value() });
@@ -928,15 +944,18 @@ exports.generateSentenceVariants = onCall(
       ? Object.entries(filledTags).filter(([, v]) => v).map(([k, v]) => `${k}: ${v}`).join(', ')
       : '';
 
+    let content = `원문: "${sentence}"\n역할: ${role}\n심리 효과: ${effect || ''}`;
+    if (tagsStr) content += `\n사용자 입력값: ${tagsStr}`;
+    if (fullTemplate) content += `\n\n전체 대본:\n${fullTemplate}`;
+    if (prevSentence) content += `\n앞 문장: "${prevSentence}"`;
+    if (nextSentence) content += `\n뒷 문장: "${nextSentence}"`;
+
     try {
       const message = await client.messages.create({
         model: MODEL,
         max_tokens: 512,
         system: GENERATE_SENTENCE_VARIANTS_PROMPT,
-        messages: [{
-          role: 'user',
-          content: `원문: "${sentence}"\n역할: ${role}\n심리 효과: ${effect || ''}${tagsStr ? `\n채워진 태그: ${tagsStr}` : ''}`,
-        }],
+        messages: [{ role: 'user', content }],
       });
       const result = parseJsonFromText(message.content[0].text);
       return { success: true, data: result };
@@ -944,6 +963,36 @@ exports.generateSentenceVariants = onCall(
       console.error('generateSentenceVariants error:', e);
       if (e instanceof HttpsError) throw e;
       throw new HttpsError('internal', '변형 생성 중 오류가 발생했습니다.');
+    }
+  }
+);
+
+exports.suggestTagValue = onCall(
+  { secrets: [anthropicApiKey], cors: true },
+  async (request) => {
+    if (!request.auth) throw new HttpsError('unauthenticated', '로그인이 필요합니다.');
+    const { tagName, tagDescription, fullTemplate, empathyPoint } = request.data;
+    if (!tagName) throw new HttpsError('invalid-argument', '태그명이 필요합니다.');
+
+    const client = new Anthropic({ apiKey: anthropicApiKey.value() });
+    const content = `태그명: ${tagName}\n태그 설명: ${tagDescription || ''}\n전체 대본 맥락: ${fullTemplate || ''}\n레퍼런스 공감 포인트: ${empathyPoint || ''}\n\n위 정보를 바탕으로 [${tagName}]에 들어갈 가장 효과적인 값 3개를 추천해줘.`;
+
+    try {
+      const message = await client.messages.create({
+        model: MODEL,
+        max_tokens: 1024,
+        tools: [{ type: 'web_search_20250305', name: 'web_search' }],
+        system: SUGGEST_TAG_VALUE_PROMPT,
+        messages: [{ role: 'user', content }],
+      });
+      const textBlocks = message.content.filter(b => b.type === 'text');
+      const rawText = textBlocks[textBlocks.length - 1]?.text || '';
+      const result = parseJsonFromText(rawText);
+      return { success: true, data: result };
+    } catch (e) {
+      console.error('suggestTagValue error:', e);
+      if (e instanceof HttpsError) throw e;
+      throw new HttpsError('internal', '태그 추천 중 오류가 발생했습니다.');
     }
   }
 );

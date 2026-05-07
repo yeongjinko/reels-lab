@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from '../../firebase/config';
 import { useApp } from '../../App';
-import { generateTemplate, generateSentenceVariants, generateQuestions } from '../../services/anthropic';
+import { generateTemplate, generateSentenceVariants, generateQuestions, suggestTagValue } from '../../services/anthropic';
 
 // ─── Josa helpers ─────────────────────────────────────────────────────────────
 
@@ -51,7 +51,7 @@ function parseTemplateLine(line) {
 
 // ─── InlineTagEdit ─────────────────────────────────────────────────────────────
 
-function InlineTagEdit({ tag, josa, value, isEditing, onStartEdit, onSave }) {
+function InlineTagEdit({ tag, josa, value, isEditing, onStartEdit, onSave, onRequestSuggestion }) {
   const [inputVal, setInputVal] = useState('');
 
   useEffect(() => {
@@ -83,22 +83,73 @@ function InlineTagEdit({ tag, josa, value, isEditing, onStartEdit, onSave }) {
     : (josa ? `[${tag}:${josa}]` : `[${tag}]`);
 
   return (
-    <span
-      onClick={onStartEdit}
-      className={`mx-0.5 cursor-pointer text-sm font-medium transition-colors ${
-        filled
-          ? 'text-green-800 hover:bg-green-100 rounded px-0.5'
-          : 'text-yellow-600 bg-yellow-50 border border-yellow-200 rounded-sm px-0.5 hover:bg-yellow-100'
-      }`}
-    >
-      {display}
+    <span className="inline-flex items-baseline gap-0.5 mx-0.5">
+      <span
+        onClick={onStartEdit}
+        className={`cursor-pointer text-sm font-medium transition-colors ${
+          filled
+            ? 'text-green-800 hover:bg-green-100 rounded px-0.5'
+            : 'text-yellow-600 bg-yellow-50 border border-yellow-200 rounded-sm px-0.5 hover:bg-yellow-100'
+        }`}
+      >
+        {display}
+      </span>
+      {!filled && onRequestSuggestion && (
+        <button
+          type="button"
+          onClick={(e) => { e.stopPropagation(); onRequestSuggestion(); }}
+          className="text-[8px] font-medium text-sky-500 border border-sky-200 rounded-full px-1 py-0.5 hover:bg-sky-50 whitespace-nowrap leading-none flex-shrink-0"
+        >
+          추천
+        </button>
+      )}
     </span>
+  );
+}
+
+// ─── TagSuggestionPanel ────────────────────────────────────────────────────────
+
+function TagSuggestionPanel({ loading, suggestions, error, onApply, onClose }) {
+  return (
+    <div className="mt-1 mb-2 bg-sky-50 border border-sky-200 rounded-xl p-3">
+      <div className="flex items-center justify-between mb-2">
+        <span className="text-[11px] font-bold text-sky-700">트렌드 추천</span>
+        <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
+          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+          </svg>
+        </button>
+      </div>
+      {loading ? (
+        <div className="flex items-center gap-2 py-1">
+          <div className="w-3 h-3 border-2 border-sky-400 border-t-transparent rounded-full animate-spin" />
+          <span className="text-xs text-gray-400">트렌드 검색 중...</span>
+        </div>
+      ) : error ? (
+        <p className="text-xs text-red-500">{error}</p>
+      ) : suggestions.length > 0 ? (
+        <div className="flex flex-col gap-1.5">
+          {suggestions.map((s, i) => (
+            <button
+              key={i}
+              onClick={() => onApply(s.value)}
+              className="text-left text-xs bg-white hover:bg-sky-100 border border-sky-200 rounded-lg px-3 py-2 transition-colors"
+            >
+              <span className="font-semibold text-sky-800">{s.value}</span>
+              {s.reason && <span className="text-gray-400 ml-1.5 text-[11px]">{s.reason}</span>}
+            </button>
+          ))}
+        </div>
+      ) : (
+        <p className="text-xs text-gray-400">추천 결과를 불러올 수 없었습니다.</p>
+      )}
+    </div>
   );
 }
 
 // ─── SentenceEditPanel ────────────────────────────────────────────────────────
 
-function SentenceEditPanel({ sentence, filledTags, onApply, onClose, onReset, hasOverride }) {
+function SentenceEditPanel({ sentence, filledTags, fullTemplate, prevSentence, nextSentence, onApply, onClose, onReset, hasOverride }) {
   const [variants, setVariants] = useState([]);
   const [loading, setLoading] = useState(false);
   const [customText, setCustomText] = useState('');
@@ -110,7 +161,10 @@ function SentenceEditPanel({ sentence, filledTags, onApply, onClose, onReset, ha
     setLoading(true);
     setError('');
     try {
-      const data = await generateSentenceVariants(sentence.text, sentence.role, sentence.effect, filledTags);
+      const data = await generateSentenceVariants(
+        sentence.text, sentence.role, sentence.effect, filledTags,
+        fullTemplate, prevSentence, nextSentence
+      );
       setVariants(data.variants || []);
     } catch {
       setError('추천 표현 생성 중 오류가 발생했습니다.');
@@ -304,6 +358,16 @@ export default function ScriptPanel({ analysis, referenceText, referenceId, init
   const [sentenceOverrides, setSentenceOverrides] = useState({});
   const [editingSentenceIndex, setEditingSentenceIndex] = useState(null);
 
+  // Full edit mode
+  const [isFullEditMode, setIsFullEditMode] = useState(false);
+  const [fullEditText, setFullEditText] = useState('');
+
+  // Tag suggestions
+  const [suggestingTagKey, setSuggestingTagKey] = useState(null);
+  const [suggestions, setSuggestions] = useState([]);
+  const [loadingSuggestions, setLoadingSuggestions] = useState(false);
+  const [suggestionError, setSuggestionError] = useState('');
+
   const [copied, setCopied] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -334,7 +398,7 @@ export default function ScriptPanel({ analysis, referenceText, referenceId, init
     [tagValues]
   );
 
-  const completedScript = useMemo(() => {
+  const templateCompletedScript = useMemo(() => {
     return templateLines.map((line, lineIndex) => {
       if (sentenceOverrides[lineIndex] !== undefined) return sentenceOverrides[lineIndex];
       let tagIdx = 0;
@@ -347,9 +411,11 @@ export default function ScriptPanel({ analysis, referenceText, referenceId, init
     }).join('\n');
   }, [templateLines, tagValues, sentenceOverrides]);
 
+  const completedScript = isFullEditMode ? fullEditText : templateCompletedScript;
+
   const hasUnfilledTags = useMemo(() => /\[[^\]]+\]/.test(completedScript), [completedScript]);
 
-  // tagName → value map for passing to SentenceEditPanel (variant generation context)
+  // tagName → value map for SentenceEditPanel context
   const filledTagsByName = useMemo(() => {
     const result = {};
     templateLines.forEach((line, lineIndex) => {
@@ -372,6 +438,10 @@ export default function ScriptPanel({ analysis, referenceText, referenceId, init
     setEditingTagKey(null);
     setSentenceOverrides({});
     setEditingSentenceIndex(null);
+    setIsFullEditMode(false);
+    setFullEditText('');
+    setSuggestingTagKey(null);
+    setSuggestions([]);
     setSaved(false);
     try {
       const data = await generateTemplate(referenceText, {});
@@ -402,6 +472,8 @@ export default function ScriptPanel({ analysis, referenceText, referenceId, init
   function handleSentenceEdit(lineIndex) {
     setEditingSentenceIndex(prev => (prev === lineIndex ? null : lineIndex));
     setEditingTagKey(null);
+    setSuggestingTagKey(null);
+    setSuggestions([]);
   }
 
   function handleSentenceApply(lineIndex, text) {
@@ -415,6 +487,61 @@ export default function ScriptPanel({ analysis, referenceText, referenceId, init
       delete next[lineIndex];
       return next;
     });
+  }
+
+  function handleEnterFullEdit() {
+    setFullEditText(templateCompletedScript);
+    setIsFullEditMode(true);
+    setEditingSentenceIndex(null);
+    setEditingTagKey(null);
+    setSuggestingTagKey(null);
+    setSuggestions([]);
+  }
+
+  function handleExitFullEdit() {
+    // Map edited lines back to sentenceOverrides
+    const lines = fullEditText.split('\n');
+    const newOverrides = {};
+    templateLines.forEach((_, i) => {
+      if (lines[i] !== undefined) newOverrides[i] = lines[i];
+    });
+    setSentenceOverrides(newOverrides);
+    setIsFullEditMode(false);
+  }
+
+  async function handleRequestSuggestion(key, tagName) {
+    setSuggestingTagKey(key);
+    setSuggestions([]);
+    setLoadingSuggestions(true);
+    setSuggestionError('');
+    setEditingTagKey(null);
+    try {
+      const tagInfo = templateData?.tags?.find(t => t.tag === tagName);
+      const data = await suggestTagValue(
+        tagName,
+        tagInfo?.description || '',
+        templateData?.template || '',
+        templateData?.empathyPoint || ''
+      );
+      setSuggestions(data.suggestions || []);
+    } catch {
+      setSuggestionError('추천을 불러오는 중 오류가 발생했습니다.');
+    } finally {
+      setLoadingSuggestions(false);
+    }
+  }
+
+  function handleApplySuggestion(value) {
+    if (!suggestingTagKey) return;
+    handleTagSave(suggestingTagKey, value);
+    setSuggestingTagKey(null);
+    setSuggestions([]);
+  }
+
+  function handleCloseSuggestion() {
+    setSuggestingTagKey(null);
+    setSuggestions([]);
+    setSuggestionError('');
   }
 
   function handleCopy() {
@@ -442,6 +569,13 @@ export default function ScriptPanel({ analysis, referenceText, referenceId, init
     } finally {
       setSaving(false);
     }
+  }
+
+  // Extract line-level suggestion key for a given lineIndex
+  function getSuggestionKeyForLine(lineIndex) {
+    if (!suggestingTagKey) return null;
+    const [li] = suggestingTagKey.split('-');
+    return parseInt(li, 10) === lineIndex ? suggestingTagKey : null;
   }
 
   return (
@@ -526,7 +660,6 @@ export default function ScriptPanel({ analysis, referenceText, referenceId, init
             )}
           </div>
         ) : (
-          /* Template editor: single column */
           <div className="flex-1 overflow-y-auto p-4">
 
             {/* Hook type badge */}
@@ -546,93 +679,136 @@ export default function ScriptPanel({ analysis, referenceText, referenceId, init
               <p className="text-xs text-orange-900 leading-relaxed">{templateData.empathyPoint}</p>
             </div>
 
-            {/* Template lines */}
+            {/* Template section */}
             <div className="bg-white border border-gray-200 rounded-xl p-3 mb-4">
               <div className="flex items-center justify-between mb-2.5">
                 <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">템플릿</p>
-                <span className="text-[10px] text-gray-400">
-                  {filledCount > 0
-                    ? `${filledCount}/${totalTagSlots} 입력됨`
-                    : '노란 태그를 클릭해서 입력'}
-                </span>
+                <div className="flex items-center gap-2">
+                  {!isFullEditMode && (
+                    <span className="text-[10px] text-gray-400">
+                      {filledCount > 0 ? `${filledCount}/${totalTagSlots} 입력됨` : '노란 태그를 클릭해서 입력'}
+                    </span>
+                  )}
+                  <button
+                    onClick={isFullEditMode ? handleExitFullEdit : handleEnterFullEdit}
+                    className={`text-[10px] font-medium px-2 py-0.5 rounded border transition-colors ${
+                      isFullEditMode
+                        ? 'bg-indigo-100 text-indigo-700 border-indigo-300 hover:bg-indigo-200'
+                        : 'text-gray-400 border-gray-200 hover:bg-gray-50 hover:text-gray-600'
+                    }`}
+                  >
+                    {isFullEditMode ? '템플릿 모드로 돌아가기' : '전체 편집'}
+                  </button>
+                </div>
               </div>
-              <div className="flex flex-col gap-0.5">
-                {templateLines.map((line, lineIndex) => {
-                  const sentenceData = templateData.sentences[lineIndex];
-                  const hasOverride = sentenceOverrides[lineIndex] !== undefined;
-                  const isEditingThis = editingSentenceIndex === lineIndex;
-                  const parts = parseTemplateLine(line);
-                  let tagIdxInLine = 0;
 
-                  return (
-                    <div key={lineIndex}>
-                      <div className="flex items-center gap-1.5 py-1 group min-h-[28px]">
-                        <div className="flex-1 text-sm text-gray-800 leading-relaxed">
-                          {hasOverride ? (
-                            <span className="bg-indigo-50 text-indigo-800 px-1.5 py-0.5 rounded text-sm">
-                              {sentenceOverrides[lineIndex]}
-                            </span>
-                          ) : (
-                            <span>
-                              {parts.map((part, pIdx) => {
-                                if (part.type === 'text') return <span key={pIdx}>{part.content}</span>;
-                                const currentTagIdx = tagIdxInLine++;
-                                const key = `${lineIndex}-${currentTagIdx}`;
-                                return (
-                                  <InlineTagEdit
-                                    key={pIdx}
-                                    tag={part.tag}
-                                    josa={part.josa}
-                                    value={tagValues[key] || ''}
-                                    isEditing={editingTagKey === key}
-                                    onStartEdit={() => setEditingTagKey(key)}
-                                    onSave={(val) => handleTagSave(key, val)}
-                                  />
-                                );
-                              })}
-                            </span>
+              {isFullEditMode ? (
+                <textarea
+                  value={fullEditText}
+                  onChange={(e) => setFullEditText(e.target.value)}
+                  rows={Math.max(6, templateLines.length + 2)}
+                  className="w-full border border-gray-200 rounded-lg p-3 text-sm text-gray-800 outline-none focus:ring-2 focus:ring-indigo-400 resize-none leading-relaxed"
+                  placeholder="대본을 자유롭게 수정하세요"
+                />
+              ) : (
+                <div className="flex flex-col gap-0.5">
+                  {templateLines.map((line, lineIndex) => {
+                    const sentenceData = templateData.sentences[lineIndex];
+                    const hasOverride = sentenceOverrides[lineIndex] !== undefined;
+                    const isEditingThis = editingSentenceIndex === lineIndex;
+                    const parts = parseTemplateLine(line);
+                    const scriptLines = templateCompletedScript.split('\n');
+                    const prevSentence = scriptLines[lineIndex - 1] || '';
+                    const nextSentence = scriptLines[lineIndex + 1] || '';
+                    const activeSuggestionKey = getSuggestionKeyForLine(lineIndex);
+                    let tagIdxInLine = 0;
+
+                    return (
+                      <div key={lineIndex}>
+                        <div className="flex items-center gap-1.5 py-1 group min-h-[28px]">
+                          <div className="flex-1 text-sm text-gray-800 leading-relaxed">
+                            {hasOverride ? (
+                              <span className="bg-indigo-50 text-indigo-800 px-1.5 py-0.5 rounded text-sm">
+                                {sentenceOverrides[lineIndex]}
+                              </span>
+                            ) : (
+                              <span>
+                                {parts.map((part, pIdx) => {
+                                  if (part.type === 'text') return <span key={pIdx}>{part.content}</span>;
+                                  const currentTagIdx = tagIdxInLine++;
+                                  const key = `${lineIndex}-${currentTagIdx}`;
+                                  return (
+                                    <InlineTagEdit
+                                      key={pIdx}
+                                      tag={part.tag}
+                                      josa={part.josa}
+                                      value={tagValues[key] || ''}
+                                      isEditing={editingTagKey === key}
+                                      onStartEdit={() => { setEditingTagKey(key); setSuggestingTagKey(null); setSuggestions([]); }}
+                                      onSave={(val) => handleTagSave(key, val)}
+                                      onRequestSuggestion={() => handleRequestSuggestion(key, part.tag)}
+                                    />
+                                  );
+                                })}
+                              </span>
+                            )}
+                          </div>
+                          {sentenceData && (
+                            <button
+                              onClick={() => handleSentenceEdit(lineIndex)}
+                              className={`flex-shrink-0 text-[9px] px-1.5 py-0.5 rounded border transition-all whitespace-nowrap ${
+                                isEditingThis
+                                  ? 'bg-indigo-100 text-indigo-700 border-indigo-300 opacity-100'
+                                  : 'bg-gray-50 text-gray-400 border-gray-200 hover:bg-gray-100 hover:text-gray-600 opacity-50 group-hover:opacity-100'
+                              }`}
+                            >
+                              {isEditingThis ? '닫기' : '다르게'}
+                            </button>
                           )}
                         </div>
-                        {sentenceData && (
-                          <button
-                            onClick={() => handleSentenceEdit(lineIndex)}
-                            className={`flex-shrink-0 text-[9px] px-1.5 py-0.5 rounded border transition-all whitespace-nowrap ${
-                              isEditingThis
-                                ? 'bg-indigo-100 text-indigo-700 border-indigo-300 opacity-100'
-                                : 'bg-gray-50 text-gray-400 border-gray-200 hover:bg-gray-100 hover:text-gray-600 opacity-50 group-hover:opacity-100'
-                            }`}
-                          >
-                            {isEditingThis ? '닫기' : '다르게'}
-                          </button>
+
+                        {activeSuggestionKey && (
+                          <TagSuggestionPanel
+                            loading={loadingSuggestions}
+                            suggestions={suggestions}
+                            error={suggestionError}
+                            onApply={handleApplySuggestion}
+                            onClose={handleCloseSuggestion}
+                          />
+                        )}
+
+                        {isEditingThis && sentenceData && (
+                          <SentenceEditPanel
+                            sentence={sentenceData}
+                            filledTags={filledTagsByName}
+                            fullTemplate={templateCompletedScript}
+                            prevSentence={prevSentence}
+                            nextSentence={nextSentence}
+                            onApply={(text) => handleSentenceApply(lineIndex, text)}
+                            onClose={() => setEditingSentenceIndex(null)}
+                            onReset={() => handleSentenceReset(lineIndex)}
+                            hasOverride={hasOverride}
+                          />
                         )}
                       </div>
-
-                      {isEditingThis && sentenceData && (
-                        <SentenceEditPanel
-                          sentence={sentenceData}
-                          filledTags={filledTagsByName}
-                          onApply={(text) => handleSentenceApply(lineIndex, text)}
-                          onClose={() => setEditingSentenceIndex(null)}
-                          onReset={() => handleSentenceReset(lineIndex)}
-                          hasOverride={hasOverride}
-                        />
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
 
-            {/* Completed script preview */}
-            <div className="bg-gray-50 border border-gray-200 rounded-xl p-3 mb-4">
-              <div className="flex items-center justify-between mb-2">
-                <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">완성된 대본 미리보기</p>
-                {hasUnfilledTags && (
-                  <span className="text-[10px] text-amber-500 font-medium">빈 태그 있음</span>
-                )}
+            {/* Completed script preview — hidden in full edit mode (textarea IS the editor) */}
+            {!isFullEditMode && (
+              <div className="bg-gray-50 border border-gray-200 rounded-xl p-3 mb-4">
+                <div className="flex items-center justify-between mb-2">
+                  <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">완성된 대본 미리보기</p>
+                  {hasUnfilledTags && (
+                    <span className="text-[10px] text-amber-500 font-medium">빈 태그 있음</span>
+                  )}
+                </div>
+                <p className="text-sm text-gray-800 leading-relaxed whitespace-pre-wrap">{completedScript}</p>
               </div>
-              <p className="text-sm text-gray-800 leading-relaxed whitespace-pre-wrap">{completedScript}</p>
-            </div>
+            )}
 
             {/* Regenerate + Copy + Save */}
             <div className="flex gap-2 mb-2">
