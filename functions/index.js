@@ -998,15 +998,16 @@ exports.suggestTagValue = onCall(
 
     userContent += `
 
-맥락을 충분히 파악할 수 있으면 바로 추천.
-파악이 불확실하면 추천 대신 사용자에게 질문 하나만 던져.
+기본적으로 추천값 3개를 바로 제시해.
+전체 대본이 아예 없어서 어떤 상품인지 전혀 알 수 없을 때만 질문 1개.
+대본이 있으면 무조건 추천.${userAnswer ? '\n사용자가 이미 답변했으므로 반드시 추천값 3개 제시.' : ''}
 
 반드시 JSON만 반환:
 
-확실할 때:
+추천할 때:
 { "needsQuestion": false, "suggestions": [{ "value": "추천값", "reason": "이유" }] }
 
-불확실할 때:
+대본이 완전히 없을 때만:
 { "needsQuestion": true, "question": "질문 한 개", "options": ["선택지1", "선택지2", "선택지3"] }`;
 
     const messages = [{ role: 'user', content: userContent }];

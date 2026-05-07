@@ -100,7 +100,7 @@ function InlineTagEdit({ tag, josa, value, isEditing, onStartEdit, onSave, onReq
           onClick={(e) => { e.stopPropagation(); onRequestSuggestion(); }}
           className="text-[8px] font-medium text-sky-500 border border-sky-200 rounded-full px-1 py-0.5 hover:bg-sky-50 whitespace-nowrap leading-none flex-shrink-0"
         >
-          추천
+          추천받기
         </button>
       )}
     </span>
@@ -115,7 +115,7 @@ function TagSuggestionPanel({ loading, suggestions, error, onApply, onClose, que
     <div className="mt-1 mb-2 bg-sky-50 border border-sky-200 rounded-xl p-3">
       <div className="flex items-center justify-between mb-2">
         <span className="text-[11px] font-bold text-sky-700">
-          {hasQuestion ? '맥락 파악 질문' : '추천'}
+          {hasQuestion ? '맥락 파악 질문' : '추천받기'}
         </span>
         <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
           <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
