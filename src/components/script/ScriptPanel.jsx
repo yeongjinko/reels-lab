@@ -49,58 +49,48 @@ function parseTemplateLine(line) {
   return parts;
 }
 
-// ─── TagInputCard ─────────────────────────────────────────────────────────────
+// ─── InlineTagEdit ─────────────────────────────────────────────────────────────
 
-function TagInputCard({ tagInfo, value, onChange }) {
+function InlineTagEdit({ tag, josa, value, isEditing, onStartEdit, onSave }) {
+  const [inputVal, setInputVal] = useState('');
+
+  useEffect(() => {
+    if (isEditing) setInputVal(value || '');
+  }, [isEditing]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const filled = Boolean(value);
-  return (
-    <div className="mb-3.5">
-      <div className="flex items-center gap-1.5 mb-1">
-        <span className={`text-[11px] font-bold px-1.5 py-0.5 rounded border leading-tight ${
-          filled
-            ? 'bg-green-100 text-green-700 border-green-200'
-            : 'bg-yellow-100 text-yellow-700 border-yellow-200'
-        }`}>
-          {tagInfo.tag}
-        </span>
-        {tagInfo.occurrences > 1 && (
-          <span className="text-[10px] text-gray-400">{tagInfo.occurrences}곳</span>
-        )}
-        {filled && (
-          <svg className="w-3 h-3 text-green-500 ml-auto flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
-          </svg>
-        )}
-      </div>
-      <p className="text-[11px] text-gray-500 mb-1 leading-snug">{tagInfo.description}</p>
+
+  if (isEditing) {
+    return (
       <input
-        value={value || ''}
-        onChange={(e) => onChange(e.target.value)}
-        placeholder={tagInfo.example ? `예) ${tagInfo.example}` : '입력...'}
-        className={`w-full border rounded-lg px-2.5 py-1.5 text-xs outline-none transition-colors placeholder-gray-400 ${
-          filled
-            ? 'border-green-200 bg-green-50 focus:ring-1 focus:ring-green-400'
-            : 'border-gray-200 bg-white focus:ring-1 focus:ring-yellow-400'
-        }`}
+        autoFocus
+        value={inputVal}
+        onChange={(e) => setInputVal(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') { e.preventDefault(); onSave(inputVal.trim()); }
+          if (e.key === 'Escape') { onSave(value || ''); }
+        }}
+        onBlur={() => onSave(inputVal.trim())}
+        placeholder={tag}
+        size={Math.max(4, (inputVal || tag).length + 1)}
+        className="inline border-b-2 border-indigo-400 bg-transparent text-sm text-gray-800 outline-none mx-0.5 px-0 align-baseline"
       />
-    </div>
-  );
-}
+    );
+  }
 
-// ─── TagDisplay (read-only chip in template) ─────────────────────────────────
-
-function TagDisplay({ tag, josa, value }) {
-  const filled = Boolean(value);
   const display = filled
     ? (josa ? applyJosa(value, josa) : value)
     : (josa ? `[${tag}:${josa}]` : `[${tag}]`);
 
   return (
-    <span className={`mx-0.5 text-sm font-medium ${
-      filled
-        ? 'text-green-800'
-        : 'text-yellow-600 bg-yellow-50 border border-yellow-200 rounded-sm px-0.5'
-    }`}>
+    <span
+      onClick={onStartEdit}
+      className={`mx-0.5 cursor-pointer text-sm font-medium transition-colors ${
+        filled
+          ? 'text-green-800 hover:bg-green-100 rounded px-0.5'
+          : 'text-yellow-600 bg-yellow-50 border border-yellow-200 rounded-sm px-0.5 hover:bg-yellow-100'
+      }`}
+    >
       {display}
     </span>
   );
@@ -308,7 +298,9 @@ export default function ScriptPanel({ analysis, referenceText, referenceId, init
   const [error, setError] = useState('');
   const [showQuestionModal, setShowQuestionModal] = useState(false);
 
+  // tagValues: { 'lineIndex-tagIndex': string } — each occurrence is independent
   const [tagValues, setTagValues] = useState({});
+  const [editingTagKey, setEditingTagKey] = useState(null);
   const [sentenceOverrides, setSentenceOverrides] = useState({});
   const [editingSentenceIndex, setEditingSentenceIndex] = useState(null);
 
@@ -329,30 +321,26 @@ export default function ScriptPanel({ analysis, referenceText, referenceId, init
     [templateData]
   );
 
-  // Recompute occurrences from actual template (more accurate than AI-reported)
-  const tagOccurrences = useMemo(() => {
-    const counts = {};
+  const totalTagSlots = useMemo(() => {
+    let count = 0;
     for (const line of templateLines) {
-      for (const m of [...line.matchAll(/\[([^\]:]+)(?::[^\]]+)?\]/g)]) {
-        counts[m[1]] = (counts[m[1]] || 0) + 1;
-      }
+      count += [...line.matchAll(/\[([^\]:]+)(?::[^\]]+)?\]/g)].length;
     }
-    return counts;
+    return count;
   }, [templateLines]);
 
-  const tags = useMemo(() => {
-    if (!templateData?.tags) return [];
-    return templateData.tags.map((t) => ({
-      ...t,
-      occurrences: tagOccurrences[t.tag] || 1,
-    }));
-  }, [templateData, tagOccurrences]);
+  const filledCount = useMemo(
+    () => Object.values(tagValues).filter(Boolean).length,
+    [tagValues]
+  );
 
   const completedScript = useMemo(() => {
-    return templateLines.map((line, i) => {
-      if (sentenceOverrides[i] !== undefined) return sentenceOverrides[i];
+    return templateLines.map((line, lineIndex) => {
+      if (sentenceOverrides[lineIndex] !== undefined) return sentenceOverrides[lineIndex];
+      let tagIdx = 0;
       return line.replace(/\[([^\]:]+)(?::([^\]]+))?\]/g, (_, tag, josa) => {
-        const val = tagValues[tag] || '';
+        const key = `${lineIndex}-${tagIdx++}`;
+        const val = tagValues[key] || '';
         if (!val) return `[${tag}]`;
         return josa ? applyJosa(val, josa) : val;
       });
@@ -361,10 +349,19 @@ export default function ScriptPanel({ analysis, referenceText, referenceId, init
 
   const hasUnfilledTags = useMemo(() => /\[[^\]]+\]/.test(completedScript), [completedScript]);
 
-  const filledCount = useMemo(
-    () => tags.filter((t) => Boolean(tagValues[t.tag])).length,
-    [tags, tagValues]
-  );
+  // tagName → value map for passing to SentenceEditPanel (variant generation context)
+  const filledTagsByName = useMemo(() => {
+    const result = {};
+    templateLines.forEach((line, lineIndex) => {
+      let tagIdx = 0;
+      for (const m of [...line.matchAll(/\[([^\]:]+)(?::[^\]]+)?\]/g)]) {
+        const key = `${lineIndex}-${tagIdx++}`;
+        const val = tagValues[key];
+        if (val) result[m[1]] = val;
+      }
+    });
+    return result;
+  }, [templateLines, tagValues]);
 
   async function handleGenerateTemplate() {
     if (!referenceText || loading) return;
@@ -372,6 +369,7 @@ export default function ScriptPanel({ analysis, referenceText, referenceId, init
     setError('');
     setTemplateData(null);
     setTagValues({});
+    setEditingTagKey(null);
     setSentenceOverrides({});
     setEditingSentenceIndex(null);
     setSaved(false);
@@ -389,22 +387,30 @@ export default function ScriptPanel({ analysis, referenceText, referenceId, init
     }
   }
 
-  function handleTagChange(tagName, value) {
-    setTagValues((prev) => ({ ...prev, [tagName]: value }));
-    setEditingSentenceIndex(null);
+  function handleTagSave(key, value) {
+    setTagValues(prev => {
+      if (!value) {
+        const next = { ...prev };
+        delete next[key];
+        return next;
+      }
+      return { ...prev, [key]: value };
+    });
+    setEditingTagKey(null);
   }
 
   function handleSentenceEdit(lineIndex) {
-    setEditingSentenceIndex((prev) => (prev === lineIndex ? null : lineIndex));
+    setEditingSentenceIndex(prev => (prev === lineIndex ? null : lineIndex));
+    setEditingTagKey(null);
   }
 
   function handleSentenceApply(lineIndex, text) {
-    setSentenceOverrides((prev) => ({ ...prev, [lineIndex]: text }));
+    setSentenceOverrides(prev => ({ ...prev, [lineIndex]: text }));
     setEditingSentenceIndex(null);
   }
 
   function handleSentenceReset(lineIndex) {
-    setSentenceOverrides((prev) => {
+    setSentenceOverrides(prev => {
       const next = { ...prev };
       delete next[lineIndex];
       return next;
@@ -468,7 +474,6 @@ export default function ScriptPanel({ analysis, referenceText, referenceId, init
           <p className="text-xs text-gray-500">레퍼런스 구조를 템플릿으로 바꿔 내 상품을 대입해보세요</p>
         </div>
 
-        {/* Pre-template states: single column */}
         {!templateData ? (
           <div className="flex-1 overflow-y-auto p-5">
             {!analysis ? (
@@ -521,182 +526,166 @@ export default function ScriptPanel({ analysis, referenceText, referenceId, init
             )}
           </div>
         ) : (
-          /* Template editor: two-column layout */
-          <div className="flex flex-1 overflow-hidden">
+          /* Template editor: single column */
+          <div className="flex-1 overflow-y-auto p-4">
 
-            {/* Left: Tag input panel */}
-            <div className="w-44 flex-shrink-0 border-r border-gray-100 overflow-y-auto flex flex-col">
-              <div className="p-3.5 flex-1">
-                <div className="flex items-center justify-between mb-3">
-                  <p className="text-[11px] font-bold text-gray-400 uppercase tracking-wider">태그 입력</p>
-                  <span className="text-[10px] text-gray-400 font-medium">
-                    {filledCount}/{tags.length}
+            {/* Hook type badge */}
+            <div className="bg-orange-50 border border-orange-200 rounded-xl p-3.5 mb-4">
+              <div className="flex items-center gap-2 mb-1.5">
+                <svg className="w-3.5 h-3.5 text-orange-500 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" />
+                </svg>
+                {templateData.hookType && (
+                  <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${
+                    templateData.isNewType ? 'bg-amber-100 text-amber-700' : 'bg-orange-100 text-orange-600'
+                  }`}>
+                    {templateData.isNewType ? '✦ ' : ''}{templateData.hookType}
                   </span>
-                </div>
-
-                {tags.map((tagInfo) => (
-                  <TagInputCard
-                    key={tagInfo.tag}
-                    tagInfo={tagInfo}
-                    value={tagValues[tagInfo.tag] || ''}
-                    onChange={(val) => handleTagChange(tagInfo.tag, val)}
-                  />
-                ))}
+                )}
               </div>
+              <p className="text-xs text-orange-900 leading-relaxed">{templateData.empathyPoint}</p>
+            </div>
 
-              {/* Regenerate */}
-              <div className="p-3 border-t border-gray-100 flex-shrink-0">
-                <button
-                  onClick={() => setShowQuestionModal(true)}
-                  className="w-full flex items-center justify-center gap-1.5 text-[11px] text-gray-400 hover:text-gray-600 border border-gray-200 rounded-lg py-2 transition-colors"
-                >
-                  <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                  </svg>
-                  새로 생성
-                </button>
+            {/* Template lines */}
+            <div className="bg-white border border-gray-200 rounded-xl p-3 mb-4">
+              <div className="flex items-center justify-between mb-2.5">
+                <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">템플릿</p>
+                <span className="text-[10px] text-gray-400">
+                  {filledCount > 0
+                    ? `${filledCount}/${totalTagSlots} 입력됨`
+                    : '노란 태그를 클릭해서 입력'}
+                </span>
+              </div>
+              <div className="flex flex-col gap-0.5">
+                {templateLines.map((line, lineIndex) => {
+                  const sentenceData = templateData.sentences[lineIndex];
+                  const hasOverride = sentenceOverrides[lineIndex] !== undefined;
+                  const isEditingThis = editingSentenceIndex === lineIndex;
+                  const parts = parseTemplateLine(line);
+                  let tagIdxInLine = 0;
+
+                  return (
+                    <div key={lineIndex}>
+                      <div className="flex items-center gap-1.5 py-1 group min-h-[28px]">
+                        <div className="flex-1 text-sm text-gray-800 leading-relaxed">
+                          {hasOverride ? (
+                            <span className="bg-indigo-50 text-indigo-800 px-1.5 py-0.5 rounded text-sm">
+                              {sentenceOverrides[lineIndex]}
+                            </span>
+                          ) : (
+                            <span>
+                              {parts.map((part, pIdx) => {
+                                if (part.type === 'text') return <span key={pIdx}>{part.content}</span>;
+                                const currentTagIdx = tagIdxInLine++;
+                                const key = `${lineIndex}-${currentTagIdx}`;
+                                return (
+                                  <InlineTagEdit
+                                    key={pIdx}
+                                    tag={part.tag}
+                                    josa={part.josa}
+                                    value={tagValues[key] || ''}
+                                    isEditing={editingTagKey === key}
+                                    onStartEdit={() => setEditingTagKey(key)}
+                                    onSave={(val) => handleTagSave(key, val)}
+                                  />
+                                );
+                              })}
+                            </span>
+                          )}
+                        </div>
+                        {sentenceData && (
+                          <button
+                            onClick={() => handleSentenceEdit(lineIndex)}
+                            className={`flex-shrink-0 text-[9px] px-1.5 py-0.5 rounded border transition-all whitespace-nowrap ${
+                              isEditingThis
+                                ? 'bg-indigo-100 text-indigo-700 border-indigo-300 opacity-100'
+                                : 'bg-gray-50 text-gray-400 border-gray-200 hover:bg-gray-100 hover:text-gray-600 opacity-50 group-hover:opacity-100'
+                            }`}
+                          >
+                            {isEditingThis ? '닫기' : '다르게'}
+                          </button>
+                        )}
+                      </div>
+
+                      {isEditingThis && sentenceData && (
+                        <SentenceEditPanel
+                          sentence={sentenceData}
+                          filledTags={filledTagsByName}
+                          onApply={(text) => handleSentenceApply(lineIndex, text)}
+                          onClose={() => setEditingSentenceIndex(null)}
+                          onReset={() => handleSentenceReset(lineIndex)}
+                          hasOverride={hasOverride}
+                        />
+                      )}
+                    </div>
+                  );
+                })}
               </div>
             </div>
 
-            {/* Right: Template display + preview + actions */}
-            <div className="flex-1 overflow-y-auto p-4">
-
-              {/* Hook type badge */}
-              <div className="bg-orange-50 border border-orange-200 rounded-xl p-3.5 mb-4">
-                <div className="flex items-center gap-2 mb-1.5">
-                  <svg className="w-3.5 h-3.5 text-orange-500 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" />
-                  </svg>
-                  {templateData.hookType && (
-                    <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${
-                      templateData.isNewType ? 'bg-amber-100 text-amber-700' : 'bg-orange-100 text-orange-600'
-                    }`}>
-                      {templateData.isNewType ? '✦ ' : ''}{templateData.hookType}
-                    </span>
-                  )}
-                </div>
-                <p className="text-xs text-orange-900 leading-relaxed">{templateData.empathyPoint}</p>
+            {/* Completed script preview */}
+            <div className="bg-gray-50 border border-gray-200 rounded-xl p-3 mb-4">
+              <div className="flex items-center justify-between mb-2">
+                <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">완성된 대본 미리보기</p>
+                {hasUnfilledTags && (
+                  <span className="text-[10px] text-amber-500 font-medium">빈 태그 있음</span>
+                )}
               </div>
+              <p className="text-sm text-gray-800 leading-relaxed whitespace-pre-wrap">{completedScript}</p>
+            </div>
 
-              {/* Template lines */}
-              <div className="bg-white border border-gray-200 rounded-xl p-3 mb-4">
-                <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-2.5">템플릿</p>
-                <div className="flex flex-col gap-0.5">
-                  {templateLines.map((line, lineIndex) => {
-                    const sentenceData = templateData.sentences[lineIndex];
-                    const hasOverride = sentenceOverrides[lineIndex] !== undefined;
-                    const isEditingThis = editingSentenceIndex === lineIndex;
-                    const parts = parseTemplateLine(line);
-
-                    return (
-                      <div key={lineIndex}>
-                        <div className="flex items-center gap-1.5 py-1 group min-h-[28px]">
-                          <div className="flex-1 text-sm text-gray-800 leading-relaxed">
-                            {hasOverride ? (
-                              <span className="bg-indigo-50 text-indigo-800 px-1.5 py-0.5 rounded text-sm">
-                                {sentenceOverrides[lineIndex]}
-                              </span>
-                            ) : (
-                              <span>
-                                {parts.map((part, pIdx) => {
-                                  if (part.type === 'text') return <span key={pIdx}>{part.content}</span>;
-                                  return (
-                                    <TagDisplay
-                                      key={pIdx}
-                                      tag={part.tag}
-                                      josa={part.josa}
-                                      value={tagValues[part.tag] || ''}
-                                    />
-                                  );
-                                })}
-                              </span>
-                            )}
-                          </div>
-                          {sentenceData && (
-                            <button
-                              onClick={() => handleSentenceEdit(lineIndex)}
-                              className={`flex-shrink-0 text-[9px] px-1.5 py-0.5 rounded border transition-all whitespace-nowrap ${
-                                isEditingThis
-                                  ? 'bg-indigo-100 text-indigo-700 border-indigo-300 opacity-100'
-                                  : 'bg-gray-50 text-gray-400 border-gray-200 hover:bg-gray-100 hover:text-gray-600 opacity-50 group-hover:opacity-100'
-                              }`}
-                            >
-                              {isEditingThis ? '닫기' : '다르게'}
-                            </button>
-                          )}
-                        </div>
-
-                        {isEditingThis && sentenceData && (
-                          <SentenceEditPanel
-                            sentence={sentenceData}
-                            filledTags={tagValues}
-                            onApply={(text) => handleSentenceApply(lineIndex, text)}
-                            onClose={() => setEditingSentenceIndex(null)}
-                            onReset={() => handleSentenceReset(lineIndex)}
-                            hasOverride={hasOverride}
-                          />
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-
-              {/* Completed script preview */}
-              <div className="bg-gray-50 border border-gray-200 rounded-xl p-3 mb-4">
-                <div className="flex items-center justify-between mb-2">
-                  <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">완성된 대본 미리보기</p>
-                  {hasUnfilledTags && (
-                    <span className="text-[10px] text-amber-500 font-medium">빈 태그 있음</span>
-                  )}
-                </div>
-                <p className="text-sm text-gray-800 leading-relaxed whitespace-pre-wrap">{completedScript}</p>
-              </div>
-
-              {/* Copy + Save */}
-              <div className="flex gap-2">
-                <button
-                  onClick={handleCopy}
-                  className="flex-1 flex items-center justify-center gap-1.5 text-sm text-indigo-600 border border-indigo-300 hover:bg-indigo-50 font-semibold py-2.5 rounded-xl transition-colors"
-                >
-                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
-                  </svg>
-                  {copied ? '복사됨 ✓' : '복사'}
-                </button>
-                <button
-                  onClick={handleSave}
-                  disabled={saving || saved}
-                  className={`flex-1 flex items-center justify-center gap-1.5 text-sm font-semibold py-2.5 rounded-xl transition-colors ${
-                    saved
-                      ? 'bg-emerald-50 text-emerald-600 border border-emerald-200 cursor-default'
-                      : saving
-                      ? 'bg-gray-100 text-gray-400 cursor-wait'
-                      : 'bg-indigo-600 hover:bg-indigo-700 text-white'
-                  }`}
-                >
-                  {saved ? (
-                    <>
-                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                      </svg>
-                      저장됨
-                    </>
-                  ) : saving ? (
-                    <>
-                      <div className="w-4 h-4 border-2 border-gray-400 border-t-transparent rounded-full animate-spin" />
-                      저장 중...
-                    </>
-                  ) : (
-                    <>
-                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4" />
-                      </svg>
-                      보관함에 저장
-                    </>
-                  )}
-                </button>
-              </div>
+            {/* Regenerate + Copy + Save */}
+            <div className="flex gap-2 mb-2">
+              <button
+                onClick={() => setShowQuestionModal(true)}
+                className="flex items-center justify-center gap-1.5 text-xs text-gray-400 hover:text-gray-600 border border-gray-200 rounded-xl py-2.5 px-3 transition-colors"
+              >
+                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                </svg>
+                새로 생성
+              </button>
+              <button
+                onClick={handleCopy}
+                className="flex-1 flex items-center justify-center gap-1.5 text-sm text-indigo-600 border border-indigo-300 hover:bg-indigo-50 font-semibold py-2.5 rounded-xl transition-colors"
+              >
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                </svg>
+                {copied ? '복사됨 ✓' : '복사'}
+              </button>
+              <button
+                onClick={handleSave}
+                disabled={saving || saved}
+                className={`flex-1 flex items-center justify-center gap-1.5 text-sm font-semibold py-2.5 rounded-xl transition-colors ${
+                  saved
+                    ? 'bg-emerald-50 text-emerald-600 border border-emerald-200 cursor-default'
+                    : saving
+                    ? 'bg-gray-100 text-gray-400 cursor-wait'
+                    : 'bg-indigo-600 hover:bg-indigo-700 text-white'
+                }`}
+              >
+                {saved ? (
+                  <>
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                    </svg>
+                    저장됨
+                  </>
+                ) : saving ? (
+                  <>
+                    <div className="w-4 h-4 border-2 border-gray-400 border-t-transparent rounded-full animate-spin" />
+                    저장 중...
+                  </>
+                ) : (
+                  <>
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4" />
+                    </svg>
+                    보관함에 저장
+                  </>
+                )}
+              </button>
             </div>
           </div>
         )}
