@@ -923,16 +923,32 @@ const GENERATE_SENTENCE_VARIANTS_PROMPT = `너는 릴스 스크립트 작성 전
 반드시 JSON만 반환:
 { "variants": ["변형1", "변형2", "변형3"] }`;
 
-const SUGGEST_TAG_VALUE_PROMPT = `너는 릴스 스크립트 작성 전문가야.
-주어진 태그에 들어갈 가장 효과적인 값을 3개 추천해줘.
+const SUGGEST_TAG_VALUE_PROMPT = `너는 릴스 대본 전문가야.
+아래 전체 대본을 먼저 완전히 읽고 이해해.
 
-웹서치로 현재 트렌드를 참고해서 실제로 효과적인 값을 추천해줘.
-단순한 예시가 아니라 실제 시장에서 통하는 값이어야 해.
+순서대로 판단해:
+1. 이 대본 전체가 말하려는 게 뭔지
+2. 이 태그가 있는 문장이 전체에서 어떤 역할인지
+3. 이 역할을 가장 잘 수행하는 값이 뭔지
 
-반드시 JSON으로만 반환:
+추천 원칙:
+- 전체 흐름을 방해하지 않는 값
+- 이 문장의 역할을 극대화하는 값
+- 트렌드보다 맥락이 항상 우선
+- 역할에 안 맞으면 트렌디해도 추천 금지
+
+웹서치로 현재 트렌드 참고는 하되
+맥락에 맞을 때만 활용.
+
+반드시 JSON만 반환:
 {
+  "contextUnderstanding": "전체 맥락 이해 한 줄 요약",
+  "tagRole": "이 태그의 역할",
   "suggestions": [
-    { "value": "추천값", "reason": "이 값을 추천하는 이유 (15자 이내)" }
+    {
+      "value": "추천값",
+      "reason": "이 맥락에서 이 값을 추천하는 이유"
+    }
   ]
 }`;
 
@@ -975,11 +991,17 @@ exports.suggestTagValue = onCall(
   { secrets: [anthropicApiKey], cors: true },
   async (request) => {
     if (!request.auth) throw new HttpsError('unauthenticated', '로그인이 필요합니다.');
-    const { tagName, tagDescription, fullTemplate, empathyPoint } = request.data;
+    const { tagName, tagDescription, fullTemplate, empathyPoint, sentence } = request.data;
     if (!tagName) throw new HttpsError('invalid-argument', '태그명이 필요합니다.');
 
     const client = new Anthropic({ apiKey: anthropicApiKey.value() });
-    const userContent = `태그명: ${tagName}\n태그 설명: ${tagDescription || ''}\n전체 대본 맥락: ${fullTemplate || ''}\n레퍼런스 공감 포인트: ${empathyPoint || ''}\n\n위 정보를 바탕으로 [${tagName}]에 들어갈 가장 효과적인 값 3개를 추천해줘.`;
+    const userContent = `전체 대본: ${fullTemplate || ''}
+레퍼런스 공감 포인트: ${empathyPoint || ''}
+태그명: ${tagName}
+태그 설명: ${tagDescription || ''}
+이 태그가 있는 문장: ${sentence || ''}
+
+위 정보를 바탕으로 [${tagName}]에 들어갈 가장 효과적인 값 3개를 추천해줘.`;
 
     const messages = [{ role: 'user', content: userContent }];
     const tools = [{ type: 'web_search_20250305', name: 'web_search' }];

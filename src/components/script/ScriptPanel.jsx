@@ -572,6 +572,8 @@ export default function ScriptPanel({ analysis, referenceText, referenceId, init
   }
 
   async function handleRequestSuggestion(key, tagName) {
+    const lineIndex = parseInt(key.split('-')[0], 10);
+    const sentence = effectiveTemplateLines[lineIndex] || '';
     setSuggestingTagKey(key);
     setSuggestions([]);
     setLoadingSuggestions(true);
@@ -582,8 +584,9 @@ export default function ScriptPanel({ analysis, referenceText, referenceId, init
       const data = await suggestTagValue(
         tagName,
         tagInfo?.description || '',
-        templateData?.template || '',
-        templateData?.empathyPoint || ''
+        templateCompletedScript,
+        templateData?.empathyPoint || '',
+        sentence
       );
       setSuggestions(data.suggestions || []);
     } catch {

@@ -65,7 +65,7 @@ export async function generateSentenceVariants(sentence, role, effect, filledTag
   return result.data.data; // { variants: [] }
 }
 
-export async function suggestTagValue(tagName, tagDescription, fullTemplate, empathyPoint) {
-  const result = await suggestTagValueFn({ tagName, tagDescription, fullTemplate, empathyPoint });
-  return result.data.data; // { suggestions: [{ value, reason }] }
+export async function suggestTagValue(tagName, tagDescription, fullTemplate, empathyPoint, sentence = '') {
+  const result = await suggestTagValueFn({ tagName, tagDescription, fullTemplate, empathyPoint, sentence });
+  return result.data.data; // { contextUnderstanding, tagRole, suggestions: [{ value, reason }] }
 }
