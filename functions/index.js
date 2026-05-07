@@ -900,21 +900,25 @@ ${sentenceSummary}`,
 );
 
 const GENERATE_SENTENCE_VARIANTS_PROMPT = `너는 릴스 스크립트 작성 전문가야.
-주어진 문장의 단어나 표현만 살짝 바꾼 변형 3개를 만들어줘.
 
-아래 전체 대본 맥락을 반드시 먼저 파악하고 해당 문장의 대안 표현을 추천해줘.
+중요: 너는 지금 새로운 문장을 만드는 게 아니야.
+아래 원문 문장 자체를 다른 표현으로 바꾸는 거야.
 
-규칙:
-1. 원문 문장의 아래 요소를 반드시 유지:
-   - 문장 길이 (비슷한 길이)
-   - 말투/어투 (반말/존댓말, 릴스 감성)
-   - 문장 역할 (같은 심리 효과)
-   - 리액션/감탄사 있으면 유지
-2. 단어나 표현만 살짝 바꾸는 수준으로만 추천
-3. 완전히 다른 문장 금지
-4. 전체 흐름에서 이 문장의 역할 유지
-5. 앞뒤 문장과 자연스럽게 연결되는 표현
-6. 사용자가 입력한 태그값 반영
+이 문장을 같은 의미/역할/감성으로 다르게 표현하는 방법 3가지를 줘.
+
+절대 하면 안 되는 것:
+- 다음에 올 문장 생성 금지
+- 원문보다 긴 문장 생성 금지
+- 원문의 역할과 다른 문장 생성 금지
+
+반드시 원문 문장 길이와 비슷하게 같은 자리에 대체할 수 있는 표현으로.
+
+추가 규칙:
+- 말투/어투 (반말/존댓말, 릴스 감성) 유지
+- 리액션/감탄사 있으면 유지
+- 전체 흐름에서 이 문장의 역할 유지
+- 앞뒤 문장과 자연스럽게 연결
+- 사용자가 입력한 태그값 반영
 
 반드시 JSON만 반환:
 { "variants": ["변형1", "변형2", "변형3"] }`;
@@ -975,22 +979,60 @@ exports.suggestTagValue = onCall(
     if (!tagName) throw new HttpsError('invalid-argument', '태그명이 필요합니다.');
 
     const client = new Anthropic({ apiKey: anthropicApiKey.value() });
-    const content = `태그명: ${tagName}\n태그 설명: ${tagDescription || ''}\n전체 대본 맥락: ${fullTemplate || ''}\n레퍼런스 공감 포인트: ${empathyPoint || ''}\n\n위 정보를 바탕으로 [${tagName}]에 들어갈 가장 효과적인 값 3개를 추천해줘.`;
+    const userContent = `태그명: ${tagName}\n태그 설명: ${tagDescription || ''}\n전체 대본 맥락: ${fullTemplate || ''}\n레퍼런스 공감 포인트: ${empathyPoint || ''}\n\n위 정보를 바탕으로 [${tagName}]에 들어갈 가장 효과적인 값 3개를 추천해줘.`;
+
+    const messages = [{ role: 'user', content: userContent }];
+    const tools = [{ type: 'web_search_20250305', name: 'web_search' }];
 
     try {
-      const message = await client.messages.create({
+      let message = await client.messages.create({
         model: MODEL,
-        max_tokens: 1024,
-        tools: [{ type: 'web_search_20250305', name: 'web_search' }],
+        max_tokens: 2048,
+        tools,
         system: SUGGEST_TAG_VALUE_PROMPT,
-        messages: [{ role: 'user', content }],
+        messages,
       });
+
+      console.log('suggestTagValue turn1 — stop_reason:', message.stop_reason, '| blocks:', message.content.map(b => b.type).join(','));
+
+      // tool_use 루프: web_search가 tool_use 방식으로 동작하면 최대 3회 처리
+      let turns = 0;
+      while (message.stop_reason === 'tool_use' && turns < 3) {
+        turns++;
+        const assistantContent = message.content;
+        messages.push({ role: 'assistant', content: assistantContent });
+
+        // tool_use 블록들에 대한 결과 반환 (web_search는 결과를 직접 넘겨줌)
+        const toolResults = assistantContent
+          .filter(b => b.type === 'tool_use')
+          .map(b => ({
+            type: 'tool_result',
+            tool_use_id: b.id,
+            content: b.type === 'tool_use' && b.name === 'web_search'
+              ? JSON.stringify(b.input || {})
+              : '처리됨',
+          }));
+
+        messages.push({ role: 'user', content: toolResults });
+
+        message = await client.messages.create({
+          model: MODEL,
+          max_tokens: 2048,
+          tools,
+          system: SUGGEST_TAG_VALUE_PROMPT,
+          messages,
+        });
+
+        console.log(`suggestTagValue turn${turns + 1} — stop_reason:`, message.stop_reason, '| blocks:', message.content.map(b => b.type).join(','));
+      }
+
       const textBlocks = message.content.filter(b => b.type === 'text');
       const rawText = textBlocks[textBlocks.length - 1]?.text || '';
+      console.log('suggestTagValue rawText[:200]:', rawText.slice(0, 200));
       const result = parseJsonFromText(rawText);
       return { success: true, data: result };
     } catch (e) {
-      console.error('suggestTagValue error:', e);
+      console.error('suggestTagValue error:', e?.message || e);
       if (e instanceof HttpsError) throw e;
       throw new HttpsError('internal', '태그 추천 중 오류가 발생했습니다.');
     }
