@@ -1027,8 +1027,8 @@ exports.suggestTagValue = onCall(
       }
 
       const textBlocks = message.content.filter(b => b.type === 'text');
-      const rawText = textBlocks[textBlocks.length - 1]?.text || '';
-      console.log('suggestTagValue rawText[:200]:', rawText.slice(0, 200));
+      const rawText = textBlocks.map(b => b.text).join('\n');
+      console.log('suggestTagValue rawText[:300]:', rawText.slice(0, 300));
       const result = parseJsonFromText(rawText);
       return { success: true, data: result };
     } catch (e) {
