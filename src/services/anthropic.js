@@ -12,6 +12,7 @@ const updateSentencesWithContextFn = httpsCallable(functions, 'updateSentencesWi
 const generateTemplateFn = httpsCallable(functions, 'generateTemplate', { timeout: 300000 });
 const generateFinalScriptFn = httpsCallable(functions, 'generateFinalScript', { timeout: 300000 });
 const generateQuestionsFn = httpsCallable(functions, 'generateQuestions');
+const generateSentenceVariantsFn = httpsCallable(functions, 'generateSentenceVariants');
 
 export async function analyzeReference(text) {
   const result = await analyzeScriptFn({ text });
@@ -56,4 +57,9 @@ export async function generateFinalScript(steps, hookType) {
 export async function generateQuestions(hookType, empathyPoint, history = []) {
   const result = await generateQuestionsFn({ hookType, empathyPoint, history });
   return result.data.data;
+}
+
+export async function generateSentenceVariants(sentence, role, effect, filledTags = {}) {
+  const result = await generateSentenceVariantsFn({ sentence, role, effect, filledTags });
+  return result.data.data; // { variants: [] }
 }

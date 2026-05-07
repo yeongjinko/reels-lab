@@ -586,8 +586,7 @@ suitableFor에 이 후킹 유형/공감 포인트가 적합한 상황 3가지를
 }`;
 
 const GENERATE_TEMPLATE_PROMPT = `너는 릴스 스크립트 코치야.
-레퍼런스 대본의 각 문장을 분석해서 문장별 역할과 심리 효과를 파악하고,
-사용자가 자신의 상품으로 같은 구조의 대본을 쓸 수 있도록 코칭 질문을 만들어줘.
+레퍼런스 대본의 핵심 단어들을 [태그] 형식으로 치환해서 누구나 자신의 상품으로 바로 쓸 수 있는 템플릿을 만들어줘.
 
 === 후킹 유형 22개 ===
 유형1: 상황제시형 : 어 이거 나 얘기잖아
@@ -612,63 +611,57 @@ const GENERATE_TEMPLATE_PROMPT = `너는 릴스 스크립트 코치야.
 유형20: 상위%공개형 : 나만 이걸 모르고 있었나?
 유형21: 의외의인물성과형 : 저런 사람도 됐다고?
 유형22: 발견공유형 : 아는 사람만 안다는 거 나도 알고 싶어
+22개에 해당하지 않으면 새 유형명 직접 생성 + isNewType: true
+유형명 형식: "유형명 : 시청자 속마음"
 
-22개에 해당하지 않으면 새 유형명 직접 생성 + isNewType: true.
-유형명 형식 반드시: "유형명 : 시청자 속마음"
+=== 태그 치환 규칙 ===
+1. 각 줄의 구조·어감·감탄사는 그대로 유지
+2. 상품명·타겟·특징·문제점·가격·CTA 등 상품마다 달라지는 핵심 단어만 [태그명]으로 교체
+3. 같은 태그 여러 줄에 반복 사용 가능 (예: [상품명])
+4. 태그명: 역할을 나타내는 2~6자 (예: 타겟, 상품명, 핵심특징, 문제점, 장점1, 가격대, 나의상황, CTA키워드, 혜택, 경쟁브랜드)
 
-=== 문장별 분석 규칙 ===
+=== tags 배열 규칙 ===
+템플릿에 나오는 모든 고유 태그를 한 번씩 포함.
+- tag: 태그명 (그대로)
+- description: 이 자리에 뭘 써야 하는지 (15자 이내)
+- example: 구체적 예시
 
-대본의 각 문장마다 steps 배열에 항목 하나씩 추가.
-각 항목의 필드:
-- sentence: 레퍼런스 원문 그대로 (한 글자도 바꾸지 말 것)
-- role: 이 문장이 하는 역할을 짧게 (예: "후킹 문장", "공감대 형성", "가격 반전", "즉각 행동 유도", "신뢰 구축")
-- effect: 시청자가 이 문장에서 느끼는 심리적 효과 (1~2문장)
-- question: 사용자가 자신의 상품으로 이 구조를 활용할 수 있도록 유도하는 질문 (1문장, 쉽고 구체적으로)
-- questionHint: 질문에 대한 예시 답변 ("예) "로 시작)
-- suggestions: 이 구조를 사용자의 상황에 맞게 바로 쓸 수 있는 표현 3개 (각 10~30자, 구어체). 사용자 정보가 제공된 경우 그 상품/타겟/강점에 맞게, 없으면 일반적인 표현으로.
+=== sentences 배열 규칙 ===
+template를 \\n으로 split했을 때 나오는 줄 수와 반드시 동일한 개수.
+각 줄에 대응:
+- text: 레퍼런스 원문 그대로
+- role: 이 줄의 역할 (예: 후킹 문장, 공감대 형성, 가격 반전)
+- effect: 시청자 심리 효과 (1~2문장)
+
+=== suitableFor ===
+이 후킹 구조가 잘 맞는 상황 3가지 (구체적으로).
 
 === 출력 예시 ===
 
-입력 대본: "여러분! 저는 룰루레몬, 알로 못 입어요! 사실 안입어요\n대신 이거 입어요 / 이게 뭐냐구요?\n알로 반의 반값으로 살 수 있어요!"
+입력: "여러분! 저는 룰루레몬, 알로 못 입어요! 사실 안입어요\n대신 이거 입어요 / 이게 뭐냐구요?\n알로 반의 반값으로 살 수 있어요!"
 
 출력:
 {
   "hookType": "브랜드반전형 : 이걸 왜 안 입어?",
   "isNewType": false,
-  "empathyPoint": "고가 브랜드를 안 입는다는 반전 고백으로 예측오류를 만들어 시청자가 멈추게 한다. 이어서 가성비 대안을 제시해 공감과 신뢰를 동시에 얻는 구조다.",
-  "empathyTags": ["예측오류", "가성비", "공감대"],
-  "steps": [
-    {
-      "sentence": "여러분! 저는 룰루레몬, 알로 못 입어요! 사실 안입어요",
-      "role": "후킹 문장",
-      "effect": "선망 브랜드를 안 입는다는 반전 고백으로 예측오류를 만들어, 시청자가 '왜?'라는 궁금증을 갖고 영상을 멈추게 한다.",
-      "question": "시청자들이 당연히 쓸 거라 생각하는 선택지가 뭐고, 나는 그걸 왜 안 쓰나요?",
-      "questionHint": "예) 다들 대형 마트 제품을 쓰는데, 저는 소형 브랜드 제품을 써요",
-      "suggestions": ["저는 그 유명한 OO 안 써요, 이게 더 좋더라고요", "다들 당연하게 쓰는 OO, 저는 오히려 안 써요", "OO 쓰다 버리고 찾아낸 진짜 제품"]
-    },
-    {
-      "sentence": "대신 이거 입어요 / 이게 뭐냐구요?",
-      "role": "호기심 증폭",
-      "effect": "대안을 제시하면서 '이게 뭔데?'라는 궁금증을 극대화해 다음 내용을 끝까지 보게 만든다.",
-      "question": "내 상품을 처음 접하는 사람이 가장 먼저 갖는 의문이나 궁금증은 뭔가요?",
-      "questionHint": "예) 이 소재가 뭐예요? 어디서 살 수 있어요?",
-      "suggestions": ["이게 뭔지 아세요? 저도 처음엔 몰랐어요", "이름 들어보셨어요? 아직 잘 모르는 분들 많더라고요", "이거 써보기 전까지는 저도 몰랐어요"]
-    },
-    {
-      "sentence": "알로 반의 반값으로 살 수 있어요!",
-      "role": "가격 반전",
-      "effect": "앞서 언급한 고가 브랜드와 가격을 직접 비교해, 기대값 대비 충격적인 가성비를 강조한다.",
-      "question": "내 상품의 가격이나 가성비를 경쟁 제품과 비교하면 어떤 말로 표현할 수 있나요?",
-      "questionHint": "예) 백화점 제품의 30% 가격에 비슷한 품질",
-      "suggestions": ["백화점 가격의 반도 안 돼요", "같은 퀄리티인데 OO원 더 싸요", "이 가격에 이 퀄리티, 처음 봤어요"]
-    }
+  "empathyPoint": "고가 브랜드를 안 입는다는 반전 고백으로 예측오류를 만들어 시청자가 멈추게 한다. 가성비 대안을 제시해 공감과 신뢰를 동시에 얻는 구조다.",
+  "suitableFor": ["비슷한 제품보다 가성비 좋은 걸 파는 사람", "시청자가 당연히 선택하는 브랜드 대신 내 제품을 소개하는 사람", "인지도는 낮지만 품질 좋은 상품을 판매하는 사람"],
+  "template": "여러분! 저는 [경쟁브랜드], [경쟁브랜드2] 못 입어요! 사실 안입어요\n대신 이거 입어요 / 이게 뭐냐구요?\n[경쟁브랜드] 반의 반값으로 살 수 있어요!",
+  "tags": [
+    { "tag": "경쟁브랜드", "description": "시청자가 아는 유명 브랜드", "example": "룰루레몬" },
+    { "tag": "경쟁브랜드2", "description": "두 번째 경쟁 브랜드", "example": "알로" }
+  ],
+  "sentences": [
+    { "text": "여러분! 저는 룰루레몬, 알로 못 입어요! 사실 안입어요", "role": "후킹 문장", "effect": "선망 브랜드를 안 입는다는 반전 고백으로 예측오류를 만들어 시청자가 왜?라는 궁금증을 갖게 한다." },
+    { "text": "대신 이거 입어요 / 이게 뭐냐구요?", "role": "호기심 증폭", "effect": "대안을 제시하며 궁금증을 극대화해 다음 내용을 끝까지 보게 만든다." },
+    { "text": "알로 반의 반값으로 살 수 있어요!", "role": "가격 반전", "effect": "고가 브랜드와 직접 비교해 충격적인 가성비를 강조한다." }
   ]
 }
 
 === 실제 대본 분석 ===
-
-위 예시와 동일한 JSON 구조로, 아래 대본의 모든 문장을 분석해서 steps 배열에 담아줘.
-JSON 외 다른 텍스트는 절대 출력하지 마.`;
+위 예시와 동일한 JSON 구조로 아래 대본을 분석해줘.
+sentences 개수 = template를 \\n으로 split한 줄 수와 반드시 일치.
+JSON 외 텍스트 절대 출력 금지.`;
 
 const GENERATE_FINAL_SCRIPT_PROMPT = `너는 릴스 스크립트 작성 전문가야.
 사용자가 레퍼런스 대본의 각 문장 구조를 학습하고 질문에 답변했어.
@@ -730,9 +723,7 @@ exports.generateTemplate = onCall(
       const rawText = message.content[0].text;
       console.log('generateTemplate API done —', Date.now() - t0, 'ms | stop_reason:', message.stop_reason, '| raw length:', rawText.length);
       const result = parseJsonFromText(rawText);
-      console.log('generateTemplate SUCCESS — steps:', result?.steps?.length, '| hookType:', result?.hookType);
-      console.log('generateTemplate step[0] keys:', Object.keys(result?.steps?.[0] || {}));
-      console.log('generateTemplate step[0] sample:', JSON.stringify(result?.steps?.[0]));
+      console.log('generateTemplate SUCCESS — hookType:', result?.hookType, '| tags:', result?.tags?.length, '| sentences:', result?.sentences?.length);
 
       if (result.isNewType && result.hookType) {
         const existing = await db.collection('newHookTypes')
@@ -894,6 +885,51 @@ ${sentenceSummary}`,
       console.error('generateScript error:', e);
       if (e instanceof HttpsError) throw e;
       throw new HttpsError('internal', '스크립트 생성 중 오류가 발생했습니다.');
+    }
+  }
+);
+
+const GENERATE_SENTENCE_VARIANTS_PROMPT = `너는 릴스 스크립트 작성 전문가야.
+주어진 문장의 심리적 역할은 유지하면서 다른 표현으로 바꾼 변형 3개를 만들어줘.
+
+규칙:
+1. 동일한 심리적 역할 수행
+2. 자연스러운 구어체/릴스 말투
+3. 사용자 태그 정보(상품/타겟/특징)가 있으면 그 내용을 반영해 구체적으로 작성
+4. 레퍼런스 원문과 너무 비슷하면 안 됨
+5. 한 문장 기준 10~40자 내외
+
+반드시 JSON만 반환:
+{ "variants": ["변형1", "변형2", "변형3"] }`;
+
+exports.generateSentenceVariants = onCall(
+  { secrets: [anthropicApiKey], cors: true },
+  async (request) => {
+    if (!request.auth) throw new HttpsError('unauthenticated', '로그인이 필요합니다.');
+    const { sentence, role, effect, filledTags } = request.data;
+    if (!sentence || !role) throw new HttpsError('invalid-argument', '필수 값이 누락됐습니다.');
+
+    const client = new Anthropic({ apiKey: anthropicApiKey.value() });
+    const tagsStr = filledTags && Object.keys(filledTags).length > 0
+      ? Object.entries(filledTags).filter(([, v]) => v).map(([k, v]) => `${k}: ${v}`).join(', ')
+      : '';
+
+    try {
+      const message = await client.messages.create({
+        model: MODEL,
+        max_tokens: 512,
+        system: GENERATE_SENTENCE_VARIANTS_PROMPT,
+        messages: [{
+          role: 'user',
+          content: `원문: "${sentence}"\n역할: ${role}\n심리 효과: ${effect || ''}${tagsStr ? `\n채워진 태그: ${tagsStr}` : ''}`,
+        }],
+      });
+      const result = parseJsonFromText(message.content[0].text);
+      return { success: true, data: result };
+    } catch (e) {
+      console.error('generateSentenceVariants error:', e);
+      if (e instanceof HttpsError) throw e;
+      throw new HttpsError('internal', '변형 생성 중 오류가 발생했습니다.');
     }
   }
 );

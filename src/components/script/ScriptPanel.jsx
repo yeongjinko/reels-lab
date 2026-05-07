@@ -1,40 +1,191 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from '../../firebase/config';
 import { useApp } from '../../App';
-import { generateTemplate, generateFinalScript, generateQuestions } from '../../services/anthropic';
+import { generateTemplate, generateSentenceVariants, generateQuestions } from '../../services/anthropic';
 
-const STEPS_DRAFT_KEY = 'rlab_steps_draft';
+// ─── helpers ──────────────────────────────────────────────────────────────────
 
-function tryRestoreStepsDraft(refText, stepsLen) {
-  try {
-    const saved = JSON.parse(localStorage.getItem(STEPS_DRAFT_KEY) || 'null');
-    if (saved?.referenceText === refText && saved?.answers?.length === stepsLen) {
-      return { answers: saved.answers, currentStep: saved.currentStep ?? 0, done: saved.done ?? false };
+function parseTemplateLine(line) {
+  const parts = [];
+  const regex = /\[([^\]]+)\]/g;
+  let lastIndex = 0;
+  let match;
+  while ((match = regex.exec(line)) !== null) {
+    if (match.index > lastIndex) {
+      parts.push({ type: 'text', content: line.slice(lastIndex, match.index) });
     }
-  } catch {}
-  return { answers: new Array(stepsLen).fill(''), currentStep: 0, done: false };
+    parts.push({ type: 'tag', tag: match[1] });
+    lastIndex = match.index + match[0].length;
+  }
+  if (lastIndex < line.length) {
+    parts.push({ type: 'text', content: line.slice(lastIndex) });
+  }
+  return parts;
 }
 
-function QuestionModal({ hookType, empathyPoint, onComplete, onClose }) {
-  // phase: 'initialLoading' | 'alignment' | 'noMatch' | 'asking' | 'qLoading' | 'error'
-  const [phase, setPhase] = useState('initialLoading');
-  const [suitableFor, setSuitableFor] = useState([]);
-  const [firstQ, setFirstQ] = useState(null);
-  const [currentQ, setCurrentQ] = useState(null);
-  const [history, setHistory] = useState([]);
-  const [answer, setAnswer] = useState('');
+// ─── TagChip ──────────────────────────────────────────────────────────────────
+
+function TagChip({ tag, value, info, isEditing, onClick, onChange, onBlur }) {
+  const filled = Boolean(value);
+
+  if (isEditing) {
+    return (
+      <input
+        autoFocus
+        value={value || ''}
+        onChange={(e) => onChange(e.target.value)}
+        onBlur={onBlur}
+        onKeyDown={(e) => { if (e.key === 'Enter') onBlur(); }}
+        placeholder={tag}
+        className="inline-block border-b-2 border-yellow-500 bg-yellow-50 text-sm px-1 py-0 outline-none mx-0.5"
+        size={Math.max((value || '').length, tag.length, 5) + 2}
+      />
+    );
+  }
+
+  return (
+    <span className="inline-flex items-center gap-0.5 mx-0.5">
+      <button
+        onClick={onClick}
+        className={`text-sm px-1.5 py-0.5 rounded font-medium transition-colors border ${
+          filled
+            ? 'bg-green-100 text-green-800 hover:bg-green-200 border-green-300'
+            : 'bg-yellow-100 text-yellow-800 hover:bg-yellow-200 border-yellow-300'
+        }`}
+      >
+        {filled ? value : tag}
+      </button>
+      {info && (
+        <span className="group relative inline-flex">
+          <span className="w-3.5 h-3.5 rounded-full bg-gray-200 text-gray-500 text-[9px] flex items-center justify-center font-bold cursor-help select-none">
+            ?
+          </span>
+          <span className="pointer-events-none absolute hidden group-hover:flex flex-col bottom-full left-0 mb-1 w-44 bg-gray-800 text-white text-xs rounded-lg p-2 z-50 shadow-lg">
+            <span>{info.description}</span>
+            {info.example && <span className="text-gray-300 mt-0.5">예) {info.example}</span>}
+          </span>
+        </span>
+      )}
+    </span>
+  );
+}
+
+// ─── SentenceEditPanel ────────────────────────────────────────────────────────
+
+function SentenceEditPanel({ sentence, filledTags, onApply, onClose, onReset, hasOverride }) {
+  const [variants, setVariants] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [customText, setCustomText] = useState('');
   const [error, setError] = useState('');
 
-  useEffect(() => { loadFirst(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { loadVariants(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  async function loadFirst() {
+  async function loadVariants() {
+    setLoading(true);
+    setError('');
+    try {
+      const data = await generateSentenceVariants(sentence.text, sentence.role, sentence.effect, filledTags);
+      setVariants(data.variants || []);
+    } catch {
+      setError('변형 생성 중 오류가 발생했습니다.');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function applyText(text) {
+    onApply(text);
+  }
+
+  return (
+    <div className="mt-1 mb-2 bg-indigo-50 border border-indigo-200 rounded-xl p-3">
+      <div className="flex items-center justify-between mb-2.5">
+        <div>
+          <span className="text-[11px] font-bold text-indigo-700">이 문장의 역할</span>
+          <span className="ml-1.5 text-xs text-indigo-900">{sentence.role}</span>
+        </div>
+        <div className="flex items-center gap-1.5">
+          {hasOverride && (
+            <button
+              onClick={onReset}
+              className="text-[11px] text-gray-400 hover:text-gray-600 border border-gray-200 rounded px-2 py-0.5"
+            >
+              원래대로
+            </button>
+          )}
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+      </div>
+
+      {loading ? (
+        <div className="flex items-center gap-2 py-2">
+          <div className="w-4 h-4 border-2 border-indigo-400 border-t-transparent rounded-full animate-spin" />
+          <span className="text-xs text-gray-400">AI 추천 변형 생성 중...</span>
+        </div>
+      ) : error ? (
+        <p className="text-xs text-red-500 mb-2">{error}</p>
+      ) : variants.length > 0 ? (
+        <div className="mb-3">
+          <p className="text-[11px] font-bold text-gray-400 mb-1.5">AI 추천 변형</p>
+          <div className="flex flex-col gap-1.5">
+            {variants.map((v, i) => (
+              <button
+                key={i}
+                onClick={() => applyText(v)}
+                className="text-left text-xs text-indigo-800 bg-white hover:bg-indigo-100 border border-indigo-200 rounded-lg px-3 py-2 transition-colors"
+              >
+                {v}
+              </button>
+            ))}
+          </div>
+        </div>
+      ) : null}
+
+      <div>
+        <p className="text-[11px] font-bold text-gray-400 mb-1.5">직접 입력</p>
+        <div className="flex gap-2">
+          <input
+            value={customText}
+            onChange={(e) => setCustomText(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && customText.trim()) { applyText(customText.trim()); setCustomText(''); }
+            }}
+            placeholder="직접 문장을 입력하세요"
+            className="flex-1 border border-gray-200 rounded-lg px-3 py-2 text-xs outline-none focus:ring-2 focus:ring-indigo-400"
+          />
+          <button
+            onClick={() => { if (customText.trim()) { applyText(customText.trim()); setCustomText(''); } }}
+            disabled={!customText.trim()}
+            className="px-3 py-1.5 bg-indigo-600 text-white text-xs font-semibold rounded-lg hover:bg-indigo-700 disabled:bg-gray-200 disabled:text-gray-400"
+          >
+            적용
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── QuestionModal (alignment check only) ─────────────────────────────────────
+
+function QuestionModal({ hookType, empathyPoint, onComplete, onClose }) {
+  const [phase, setPhase] = useState('initialLoading');
+  const [suitableFor, setSuitableFor] = useState([]);
+  const [error, setError] = useState('');
+
+  useEffect(() => { loadSuitableFor(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function loadSuitableFor() {
     setPhase('initialLoading');
     setError('');
     try {
       const data = await generateQuestions(hookType, empathyPoint, []);
       setSuitableFor(data.suitableFor || []);
-      setFirstQ(data);
       setPhase('alignment');
     } catch (e) {
       setError(e.message || '오류가 발생했습니다.');
@@ -42,68 +193,28 @@ function QuestionModal({ hookType, empathyPoint, onComplete, onClose }) {
     }
   }
 
-  async function handleSubmit() {
-    const trimmed = answer.trim();
-    if (!trimmed || !currentQ) return;
-    const newHistory = [...history, { question: currentQ.question, answer: trimmed }];
-    setHistory(newHistory);
-    setAnswer('');
-    if (newHistory.length >= 5) {
-      onComplete(currentQ.collectedInfo || {});
-      return;
-    }
-    setPhase('qLoading');
-    setError('');
-    try {
-      const data = await generateQuestions(hookType, empathyPoint, newHistory);
-      if (data.isComplete) {
-        onComplete(data.collectedInfo || {});
-      } else {
-        setCurrentQ(data);
-        setPhase('asking');
-      }
-    } catch (e) {
-      setError(e.message || '질문 생성 중 오류가 발생했습니다.');
-      setPhase('error');
-    }
-  }
-
-  const stepNum = history.length + 1;
-  const isAsking = phase === 'asking';
-  const isLoading = phase === 'initialLoading' || phase === 'qLoading';
-
   return (
     <div className="fixed inset-0 bg-black/50 flex items-end sm:items-center justify-center z-50 p-0 sm:p-4">
       <div className="bg-white rounded-t-2xl sm:rounded-2xl shadow-xl w-full sm:max-w-md flex flex-col max-h-[90vh]">
-        {/* 헤더 */}
         <div className="flex items-center justify-between px-5 pt-5 pb-3 border-b border-gray-100 flex-shrink-0">
-          <div>
-            <h3 className="font-bold text-gray-900 text-sm">
-              {phase === 'alignment' ? '결 맞는지 확인' : phase === 'noMatch' ? '다른 레퍼런스 찾기' : '내 콘텐츠 정보 입력'}
-            </h3>
-            {isAsking && <p className="text-xs text-gray-400 mt-0.5">질문 {stepNum} / 최대 5</p>}
-          </div>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 transition-colors p-1">
+          <h3 className="font-bold text-gray-900 text-sm">
+            {phase === 'alignment' ? '결 맞는지 확인' : phase === 'noMatch' ? '다른 레퍼런스 찾기' : ''}
+          </h3>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 p-1">
             <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
             </svg>
           </button>
         </div>
 
-        {/* 콘텐츠 */}
         <div className="flex-1 overflow-y-auto px-5 py-4">
-
-          {/* 로딩 */}
-          {isLoading && (
+          {phase === 'initialLoading' && (
             <div className="flex flex-col items-center justify-center py-10 gap-3">
               <div className="w-5 h-5 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
-              <p className="text-xs text-gray-400">
-                {phase === 'initialLoading' ? '이 릴스가 어떤 상황에 맞는지 확인 중...' : '다음 질문 준비 중...'}
-              </p>
+              <p className="text-xs text-gray-400">이 릴스가 어떤 상황에 맞는지 확인 중...</p>
             </div>
           )}
 
-          {/* 결 맞는지 확인 */}
           {phase === 'alignment' && (
             <div className="flex flex-col gap-3">
               <p className="text-sm font-semibold text-gray-800">이 릴스는 이런 상황에 잘 맞아요</p>
@@ -111,7 +222,7 @@ function QuestionModal({ hookType, empathyPoint, onComplete, onClose }) {
                 {suitableFor.map((item, i) => (
                   <button
                     key={i}
-                    onClick={() => { setCurrentQ(firstQ); setPhase('asking'); }}
+                    onClick={() => onComplete()}
                     className="flex items-center gap-3 text-left w-full px-4 py-3.5 border border-gray-200 rounded-xl hover:border-indigo-400 hover:bg-indigo-50 transition-colors group"
                   >
                     <div className="w-4 h-4 rounded-full border-2 border-gray-300 group-hover:border-indigo-500 flex-shrink-0 transition-colors" />
@@ -120,7 +231,7 @@ function QuestionModal({ hookType, empathyPoint, onComplete, onClose }) {
                 ))}
                 <button
                   onClick={() => setPhase('noMatch')}
-                  className="flex items-center gap-3 text-left w-full px-4 py-3.5 border border-gray-200 rounded-xl hover:bg-gray-50 transition-colors group"
+                  className="flex items-center gap-3 text-left w-full px-4 py-3.5 border border-gray-200 rounded-xl hover:bg-gray-50 transition-colors"
                 >
                   <div className="w-4 h-4 rounded-full border-2 border-gray-200 flex-shrink-0" />
                   <span className="text-sm text-gray-400">해당 없음</span>
@@ -129,7 +240,6 @@ function QuestionModal({ hookType, empathyPoint, onComplete, onClose }) {
             </div>
           )}
 
-          {/* 해당 없음 */}
           {phase === 'noMatch' && (
             <div className="flex flex-col gap-4 py-2">
               <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
@@ -149,69 +259,11 @@ function QuestionModal({ hookType, empathyPoint, onComplete, onClose }) {
             </div>
           )}
 
-          {/* Q&A */}
-          {isAsking && currentQ && (
-            <div className="flex flex-col gap-4">
-              {currentQ.referenceExample && (
-                <div className="bg-orange-50 border border-orange-100 rounded-xl px-4 py-3">
-                  <p className="text-[10px] font-bold text-orange-400 uppercase tracking-wider mb-1">레퍼런스 패턴</p>
-                  <p className="text-xs text-orange-800 italic">"{currentQ.referenceExample}"</p>
-                </div>
-              )}
-              <div className="bg-indigo-50 border border-indigo-100 rounded-xl px-4 py-3">
-                <p className="text-sm font-semibold text-indigo-900 leading-relaxed">{currentQ.question}</p>
-              </div>
-              {currentQ.examples?.length > 0 && (
-                <div>
-                  <p className="text-[11px] font-bold text-gray-400 mb-2">💡 예시 선택</p>
-                  <div className="flex flex-col gap-1.5">
-                    {currentQ.examples.map((ex, i) => (
-                      <button
-                        key={i}
-                        onClick={() => setAnswer(ex)}
-                        className={`text-left text-xs px-3 py-2 rounded-lg border transition-colors ${
-                          answer === ex ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'
-                        }`}
-                      >
-                        {ex}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
-              <div>
-                <label className="block text-[11px] font-bold text-gray-500 mb-1.5">직접 입력</label>
-                <textarea
-                  value={answer}
-                  onChange={(e) => setAnswer(e.target.value)}
-                  placeholder="직접 입력하거나 위 예시를 선택해보세요"
-                  rows={3}
-                  className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm text-gray-800 leading-relaxed resize-none outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent bg-white placeholder-gray-400"
-                  onKeyDown={(e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) handleSubmit(); }}
-                />
-              </div>
-              {history.length > 0 && (
-                <div className="bg-gray-50 border border-gray-100 rounded-xl p-3">
-                  <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-2">지금까지 답변</p>
-                  <div className="flex flex-col gap-1.5">
-                    {history.map((h, i) => (
-                      <div key={i} className="flex gap-2 text-xs text-gray-600">
-                        <span className="text-indigo-400 font-bold flex-shrink-0">Q{i + 1}</span>
-                        <span className="truncate">{h.answer}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* 에러 */}
           {phase === 'error' && (
             <div className="flex flex-col gap-3 py-4">
               <div className="bg-red-50 border border-red-200 text-red-600 text-xs rounded-xl px-4 py-3">{error}</div>
               <button
-                onClick={history.length === 0 ? loadFirst : () => setPhase('asking')}
+                onClick={loadSuitableFor}
                 className="text-sm text-indigo-600 border border-indigo-200 hover:bg-indigo-50 font-semibold py-2.5 rounded-xl transition-colors"
               >
                 다시 시도
@@ -219,390 +271,121 @@ function QuestionModal({ hookType, empathyPoint, onComplete, onClose }) {
             </div>
           )}
         </div>
-
-        {/* 하단 버튼 */}
-        {isAsking && currentQ && (
-          <div className="px-5 pb-5 pt-3 border-t border-gray-100 flex-shrink-0">
-            <button
-              onClick={handleSubmit}
-              disabled={!answer.trim()}
-              className="w-full flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-700 disabled:bg-gray-200 disabled:text-gray-400 text-white font-semibold py-3 rounded-xl transition-colors text-sm"
-            >
-              다음
-              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-              </svg>
-            </button>
-          </div>
-        )}
       </div>
     </div>
   );
 }
 
-function StepCard({ step, index, total, answer, onAnswerChange, onNext, onPrev }) {
-  const isLast = index === total - 1;
-  console.log(`[StepCard] index=${index} step:`, step);
-
-  return (
-    <div className="flex flex-col gap-4">
-      {/* 레퍼런스 원문 */}
-      <div className="bg-gray-50 border border-gray-200 rounded-xl p-4">
-        <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block mb-2">레퍼런스 원문</span>
-        <p className="text-sm text-gray-600 leading-relaxed italic">"{step.sentence}"</p>
-      </div>
-
-      {/* 역할 배지 + 심리 효과 */}
-      <div className="flex flex-col gap-2">
-        <span className="inline-flex text-[11px] font-bold bg-indigo-100 text-indigo-700 px-2.5 py-1 rounded-full self-start">
-          {step.role}
-        </span>
-        <div className="bg-amber-50 border border-amber-200 rounded-xl p-3">
-          <div className="flex items-center gap-1.5 mb-1.5">
-            <svg className="w-3.5 h-3.5 text-amber-600 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
-            </svg>
-            <span className="text-xs font-bold text-amber-700">시청자 심리</span>
-          </div>
-          <p className="text-xs text-amber-900 leading-relaxed">{step.effect}</p>
-        </div>
-      </div>
-
-      {/* 코치 질문 */}
-      <div className="bg-indigo-50 border border-indigo-200 rounded-xl p-4">
-        <div className="flex items-center gap-1.5 mb-2">
-          <svg className="w-3.5 h-3.5 text-indigo-600 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-          </svg>
-          <span className="text-xs font-bold text-indigo-700">코치 질문</span>
-        </div>
-        <p className="text-sm font-semibold text-indigo-900 leading-relaxed">{step.question}</p>
-        {step.questionHint && (
-          <p className="text-xs text-indigo-500 mt-2">{step.questionHint}</p>
-        )}
-      </div>
-
-      {/* 사용자 입력 */}
-      <div>
-        <label className="block text-xs font-bold text-gray-700 mb-2">내 답변</label>
-        <textarea
-          value={answer}
-          onChange={(e) => onAnswerChange(e.target.value)}
-          placeholder="답변을 입력해보세요"
-          rows={3}
-          className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm text-gray-800 leading-relaxed resize-none outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent bg-white placeholder-gray-400"
-        />
-        {step.suggestions?.length > 0 && (
-          <div className="mt-2.5">
-            <p className="text-[11px] font-bold text-gray-400 mb-1.5">💡 이런 표현 어때요?</p>
-            <div className="flex flex-col gap-1.5">
-              {step.suggestions.map((s, i) => (
-                <button
-                  key={i}
-                  onClick={() => onAnswerChange(answer ? `${answer} ${s}` : s)}
-                  className="text-left text-xs text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-100 px-3 py-2 rounded-lg transition-colors"
-                >
-                  {s}
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
-      </div>
-
-      {/* 이동 버튼 */}
-      <div className="flex gap-2">
-        {index > 0 && (
-          <button
-            onClick={onPrev}
-            className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-700 px-4 py-2.5 border border-gray-200 rounded-xl hover:bg-gray-50 transition-colors"
-          >
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-            </svg>
-            이전
-          </button>
-        )}
-        <button
-          onClick={onNext}
-          className="flex-1 flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-2.5 rounded-xl transition-colors text-sm"
-        >
-          {isLast ? '완료' : '다음'}
-          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={isLast ? 'M5 13l4 4L19 7' : 'M9 5l7 7-7 7'} />
-          </svg>
-        </button>
-      </div>
-    </div>
-  );
-}
-
-function CompletionView({ steps, answers, hookType, onPrev, onSave, saving, saved }) {
-  const [generating, setGenerating] = useState(false);
-  const [finalScript, setFinalScript] = useState('');
-  const [genError, setGenError] = useState('');
-  const [copied, setCopied] = useState(false);
-
-  async function handleGenerate() {
-    setGenerating(true);
-    setGenError('');
-    try {
-      const stepsWithAnswers = steps.map((s, i) => ({ ...s, userInput: answers[i] || '' }));
-      const data = await generateFinalScript(stepsWithAnswers, hookType);
-      setFinalScript(data.script || '');
-    } catch (e) {
-      setGenError(e.message || '대본 생성 중 오류가 발생했습니다.');
-    } finally {
-      setGenerating(false);
-    }
-  }
-
-  function handleCopy() {
-    navigator.clipboard.writeText(finalScript);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1500);
-  }
-
-  return (
-    <div className="flex flex-col gap-4">
-      {/* 답변 요약 */}
-      <div className="bg-gray-50 border border-gray-200 rounded-xl p-4">
-        <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">내 답변 요약</p>
-        <div className="flex flex-col gap-2.5">
-          {steps.map((step, i) => (
-            <div key={i} className="flex gap-2">
-              <span className="text-[10px] font-bold text-indigo-500 bg-indigo-50 px-1.5 py-0.5 rounded-full h-fit mt-0.5 whitespace-nowrap flex-shrink-0">
-                {step.role}
-              </span>
-              <p className="text-xs text-gray-600 leading-relaxed flex-1">
-                {answers[i] || <span className="text-gray-400 italic">미입력</span>}
-              </p>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* 생성 전 */}
-      {!finalScript && (
-        <>
-          {generating ? (
-            <div className="flex flex-col items-center justify-center py-6 gap-2">
-              <div className="w-5 h-5 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
-              <p className="text-xs text-gray-400">내 대본을 완성하는 중...</p>
-            </div>
-          ) : genError ? (
-            <div className="flex flex-col gap-2">
-              <div className="bg-red-50 border border-red-200 text-red-600 text-xs rounded-xl px-4 py-3">
-                {genError}
-              </div>
-              <button
-                onClick={handleGenerate}
-                className="flex items-center justify-center gap-2 text-sm text-indigo-600 border border-indigo-200 hover:bg-indigo-50 font-semibold px-4 py-2.5 rounded-xl transition-colors"
-              >
-                다시 시도
-              </button>
-            </div>
-          ) : (
-            <button
-              onClick={handleGenerate}
-              className="w-full flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-3 rounded-xl transition-colors text-sm"
-            >
-              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
-              </svg>
-              완성 대본 생성하기
-            </button>
-          )}
-          {!generating && (
-            <button
-              onClick={onPrev}
-              className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-700 px-4 py-2.5 border border-gray-200 rounded-xl hover:bg-gray-50 transition-colors self-start"
-            >
-              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-              </svg>
-              수정하기
-            </button>
-          )}
-        </>
-      )}
-
-      {/* 생성 완료 */}
-      {finalScript && (
-        <>
-          <div className="bg-gray-50 border border-gray-200 rounded-xl p-4">
-            <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">완성 대본</p>
-            <p className="text-sm text-gray-800 leading-relaxed whitespace-pre-wrap">{finalScript}</p>
-          </div>
-
-          <div className="flex gap-2">
-            <button
-              onClick={onPrev}
-              className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-700 px-4 py-2.5 border border-gray-200 rounded-xl hover:bg-gray-50 transition-colors"
-            >
-              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-              </svg>
-              수정
-            </button>
-            <button
-              onClick={handleGenerate}
-              disabled={generating}
-              className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-700 px-4 py-2.5 border border-gray-200 rounded-xl hover:bg-gray-50 transition-colors"
-            >
-              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-              </svg>
-              재생성
-            </button>
-            <button
-              onClick={handleCopy}
-              className="flex-1 flex items-center justify-center gap-1.5 text-sm text-indigo-600 border border-indigo-300 hover:bg-indigo-50 font-semibold py-2.5 rounded-xl transition-colors"
-            >
-              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
-              </svg>
-              {copied ? '복사됨 ✓' : '복사'}
-            </button>
-          </div>
-
-          <button
-            onClick={() => onSave(finalScript)}
-            disabled={saving || saved}
-            className={`w-full flex items-center justify-center gap-2 font-semibold py-2.5 rounded-xl transition-colors text-sm ${
-              saved
-                ? 'bg-emerald-50 text-emerald-600 border border-emerald-200 cursor-default'
-                : saving
-                ? 'bg-gray-100 text-gray-400 cursor-wait'
-                : 'bg-indigo-600 hover:bg-indigo-700 text-white'
-            }`}
-          >
-            {saved ? (
-              <>
-                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                </svg>
-                내 보관함에 저장됨
-              </>
-            ) : saving ? (
-              <>
-                <div className="w-4 h-4 border-2 border-gray-400 border-t-transparent rounded-full animate-spin" />
-                저장 중...
-              </>
-            ) : (
-              <>
-                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4" />
-                </svg>
-                내 보관함에 저장
-              </>
-            )}
-          </button>
-        </>
-      )}
-    </div>
-  );
-}
+// ─── ScriptPanel (main) ───────────────────────────────────────────────────────
 
 export default function ScriptPanel({ analysis, referenceText, referenceId, initialTemplateData }) {
   const { user } = useApp();
+
   const [templateData, setTemplateData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [showQuestionModal, setShowQuestionModal] = useState(false);
 
-  const [currentStep, setCurrentStep] = useState(0);
-  const [answers, setAnswers] = useState([]);
-  const [done, setDone] = useState(false);
+  const [tagValues, setTagValues] = useState({});
+  const [editingTagKey, setEditingTagKey] = useState(null); // { lineIndex, partIndex }
+  const [sentenceOverrides, setSentenceOverrides] = useState({});
+  const [editingSentenceIndex, setEditingSentenceIndex] = useState(null);
 
+  const [copied, setCopied] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [toast, setToast] = useState('');
 
-  const [showQuestionModal, setShowQuestionModal] = useState(false);
-
-  useEffect(() => {
-    if (!referenceText || !templateData) return;
-    try {
-      localStorage.setItem(STEPS_DRAFT_KEY, JSON.stringify({
-        referenceText,
-        answers,
-        currentStep,
-        done,
-      }));
-    } catch {}
-  }, [answers, currentStep, done, referenceText, templateData]);
-
-  // 새 형식(sentence 필드 있음)의 초기 템플릿만 바로 사용
+  // Load initial template (new format)
   useEffect(() => {
     if (!referenceText || !analysis || !initialTemplateData || templateData) return;
-    const isNewFormat = initialTemplateData.steps?.[0]?.sentence != null;
-    if (!isNewFormat) return;
-    setTemplateData(initialTemplateData);
-    const stepsLen = (initialTemplateData.steps || []).length;
-    const restored = tryRestoreStepsDraft(referenceText, stepsLen);
-    setAnswers(restored.answers);
-    setCurrentStep(restored.currentStep);
-    setDone(restored.done);
+    if (initialTemplateData.template != null) {
+      setTemplateData(initialTemplateData);
+    }
   }, [referenceText, analysis]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  async function handleGenerateTemplate(info = {}) {
+  const templateLines = useMemo(
+    () => (templateData?.template || '').split('\n'),
+    [templateData]
+  );
+
+  const completedScript = useMemo(() => {
+    return templateLines.map((line, i) => {
+      if (sentenceOverrides[i] !== undefined) return sentenceOverrides[i];
+      return line.replace(/\[([^\]]+)\]/g, (_, tag) => tagValues[tag] || `[${tag}]`);
+    }).join('\n');
+  }, [templateLines, tagValues, sentenceOverrides]);
+
+  const hasUnfilledTags = useMemo(() => /\[[^\]]+\]/.test(completedScript), [completedScript]);
+
+  async function handleGenerateTemplate() {
     if (!referenceText || loading) return;
     setLoading(true);
     setError('');
     setTemplateData(null);
+    setTagValues({});
+    setSentenceOverrides({});
+    setEditingTagKey(null);
+    setEditingSentenceIndex(null);
     setSaved(false);
     try {
-      const data = await generateTemplate(referenceText, info);
-      console.log('[ScriptPanel] generateTemplate 응답:', JSON.stringify({
-        hookType: data?.hookType,
-        stepsLen: data?.steps?.length,
-        step0: data?.steps?.[0],
-      }));
-      const firstStep = data.steps?.[0];
-      // 구 포맷(section/why/how/example) 또는 필수 필드 누락 체크
-      if (!firstStep?.sentence || !firstStep?.role || !firstStep?.question) {
-        console.error('[ScriptPanel] format error — step[0]:', firstStep);
-        setError('코치 데이터 형식 오류가 발생했습니다. 다시 시도해주세요.');
+      const data = await generateTemplate(referenceText, {});
+      if (!data.template || !Array.isArray(data.tags) || !Array.isArray(data.sentences)) {
+        setError('템플릿 형식 오류가 발생했습니다. 다시 시도해주세요.');
         return;
       }
       setTemplateData(data);
-      const stepsLen = (data.steps || []).length;
-      const restored = tryRestoreStepsDraft(referenceText, stepsLen);
-      setAnswers(restored.answers);
-      setCurrentStep(restored.currentStep);
-      setDone(restored.done);
     } catch (e) {
-      setError(e.message || '코치 생성 중 오류가 발생했습니다.');
+      setError(e.message || '템플릿 생성 중 오류가 발생했습니다.');
     } finally {
       setLoading(false);
     }
   }
 
-  const steps = templateData?.steps || [];
-
-  function handleAnswerChange(val) {
-    setAnswers((prev) => prev.map((a, i) => i === currentStep ? val : a));
+  function handleTagClick(lineIndex, partIndex) {
+    setEditingTagKey({ lineIndex, partIndex });
   }
 
-  function handleNext() {
-    if (currentStep < steps.length - 1) setCurrentStep((s) => s + 1);
-    else setDone(true);
+  function handleTagChange(tagName, value) {
+    setTagValues((prev) => ({ ...prev, [tagName]: value }));
   }
 
-  function handlePrev() {
-    if (done) { setDone(false); return; }
-    setCurrentStep((s) => Math.max(0, s - 1));
+  function handleTagBlur() {
+    setEditingTagKey(null);
   }
 
-  async function handleSave(script) {
-    if (!user || !script) return;
+  function handleSentenceEdit(lineIndex) {
+    setEditingSentenceIndex((prev) => (prev === lineIndex ? null : lineIndex));
+  }
+
+  function handleSentenceApply(lineIndex, text) {
+    setSentenceOverrides((prev) => ({ ...prev, [lineIndex]: text }));
+    setEditingSentenceIndex(null);
+  }
+
+  function handleSentenceReset(lineIndex) {
+    setSentenceOverrides((prev) => {
+      const next = { ...prev };
+      delete next[lineIndex];
+      return next;
+    });
+  }
+
+  function handleCopy() {
+    navigator.clipboard.writeText(completedScript);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
+  }
+
+  async function handleSave() {
+    if (!user || !completedScript) return;
     setSaving(true);
     try {
       await addDoc(collection(db, 'myScripts'), {
         userId: user.uid,
         createdAt: serverTimestamp(),
-        script,
-        preview: script.slice(0, 50),
+        script: completedScript,
+        preview: completedScript.slice(0, 50),
         referenceId: referenceId || null,
       });
       setSaved(true);
@@ -625,21 +408,23 @@ export default function ScriptPanel({ analysis, referenceText, referenceId, init
           {toast}
         </div>
       )}
+
       {showQuestionModal && (
         <QuestionModal
           hookType={analysis?.hookFormulaType || analysis?.hookFormula || ''}
           empathyPoint={analysis?.hookFormulaDesc || ''}
           onClose={() => setShowQuestionModal(false)}
-          onComplete={(collectedInfo) => {
+          onComplete={() => {
             setShowQuestionModal(false);
-            handleGenerateTemplate(collectedInfo);
+            handleGenerateTemplate();
           }}
         />
       )}
+
       <div className="flex flex-col h-full">
         <div className="p-5 border-b border-gray-100 flex-shrink-0">
           <h2 className="font-bold text-gray-900 mb-0.5">스크립트 작성</h2>
-          <p className="text-xs text-gray-500">레퍼런스 문장 구조를 따라 내 상황을 대입해 대본을 만들어보세요</p>
+          <p className="text-xs text-gray-500">레퍼런스 구조를 템플릿으로 바꿔 내 상품을 대입해보세요</p>
         </div>
 
         <div className="flex-1 overflow-y-auto p-5">
@@ -655,16 +440,14 @@ export default function ScriptPanel({ analysis, referenceText, referenceId, init
           ) : loading ? (
             <div className="flex flex-col items-center justify-center h-48 gap-2">
               <div className="w-5 h-5 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
-              <p className="text-xs text-gray-400">문장별 코치 생성 중...</p>
+              <p className="text-xs text-gray-400">단어 치환 템플릿 생성 중...</p>
             </div>
           ) : error ? (
             <div className="flex flex-col gap-3">
-              <div className="bg-red-50 border border-red-200 text-red-600 text-sm rounded-xl px-4 py-3">
-                {error}
-              </div>
+              <div className="bg-red-50 border border-red-200 text-red-600 text-sm rounded-xl px-4 py-3">{error}</div>
               <button
                 onClick={() => setShowQuestionModal(true)}
-                className="flex items-center justify-center gap-2 text-sm font-semibold text-indigo-600 hover:text-indigo-700 border border-indigo-200 hover:bg-indigo-50 px-4 py-2.5 rounded-xl transition-colors"
+                className="flex items-center justify-center gap-2 text-sm font-semibold text-indigo-600 border border-indigo-200 hover:bg-indigo-50 px-4 py-2.5 rounded-xl transition-colors"
               >
                 <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
@@ -680,7 +463,7 @@ export default function ScriptPanel({ analysis, referenceText, referenceId, init
                 </svg>
               </div>
               <p className="text-xs text-gray-400 mb-4 leading-relaxed">
-                레퍼런스 문장 하나하나를 분석해서<br />내 상황에 맞는 질문을 만들어드려요
+                레퍼런스 구조를 분석해서<br />빈칸 채우기 템플릿을 만들어드려요
               </p>
               <button
                 onClick={() => setShowQuestionModal(true)}
@@ -694,79 +477,152 @@ export default function ScriptPanel({ analysis, referenceText, referenceId, init
             </div>
           ) : (
             <div className="flex flex-col gap-5">
-              {/* 후킹 유형 + 공감 포인트 */}
+              {/* Hook type badge */}
               <div className="bg-orange-50 border border-orange-200 rounded-xl p-4">
                 <div className="flex items-center gap-2 mb-2">
                   <svg className="w-4 h-4 text-orange-500 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" />
                   </svg>
                   {templateData.hookType && (
-                    <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full ${templateData.isNewType ? 'bg-amber-100 text-amber-700' : 'bg-orange-100 text-orange-600'}`}>
+                    <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full ${
+                      templateData.isNewType ? 'bg-amber-100 text-amber-700' : 'bg-orange-100 text-orange-600'
+                    }`}>
                       {templateData.isNewType ? '✦ ' : ''}{templateData.hookType}
                     </span>
                   )}
                 </div>
                 <p className="text-xs text-orange-900 leading-relaxed">{templateData.empathyPoint}</p>
-                {templateData.empathyTags?.length > 0 && (
-                  <div className="flex flex-wrap gap-1.5 mt-2.5">
-                    {templateData.empathyTags.map((tag, i) => (
-                      <span key={i} className="text-[11px] bg-orange-100 text-orange-700 px-2 py-0.5 rounded-full font-medium">#{tag}</span>
-                    ))}
-                  </div>
-                )}
               </div>
 
-              {/* 진행바 */}
-              {steps.length > 0 && (
-                <div>
-                  <div className="flex items-center justify-between mb-1.5">
-                    <span className="text-xs font-semibold text-gray-500">
-                      {done ? '완성!' : `STEP ${currentStep + 1} / ${steps.length}`}
-                    </span>
-                    <span className="text-xs text-gray-400">
-                      {done ? steps.length : currentStep}/{steps.length} 완료
-                    </span>
-                  </div>
-                  <div className="flex gap-1">
-                    {steps.map((_, i) => (
-                      <div
-                        key={i}
-                        className={`h-1.5 flex-1 rounded-full transition-colors ${
-                          done || i < currentStep
-                            ? 'bg-indigo-500'
-                            : i === currentStep
-                            ? 'bg-indigo-300'
-                            : 'bg-gray-200'
-                        }`}
-                      />
-                    ))}
-                  </div>
-                </div>
-              )}
+              {/* Template lines */}
+              <div className="bg-white border border-gray-200 rounded-xl p-4">
+                <p className="text-[11px] font-bold text-gray-400 uppercase tracking-wider mb-3">
+                  템플릿 · 노란 단어를 클릭해서 채워보세요
+                </p>
+                <div className="flex flex-col gap-0.5">
+                  {templateLines.map((line, lineIndex) => {
+                    const sentenceData = templateData.sentences[lineIndex];
+                    const hasOverride = sentenceOverrides[lineIndex] !== undefined;
+                    const isEditingThis = editingSentenceIndex === lineIndex;
+                    const parts = parseTemplateLine(line);
 
-              {/* 단계별 코치 or 완성 화면 */}
-              {done ? (
-                <CompletionView
-                  steps={steps}
-                  answers={answers}
-                  hookType={templateData.hookType}
-                  onPrev={handlePrev}
-                  onSave={handleSave}
-                  saving={saving}
-                  saved={saved}
-                />
-              ) : steps.length > 0 ? (
-                <StepCard
-                  key={currentStep}
-                  step={steps[currentStep]}
-                  index={currentStep}
-                  total={steps.length}
-                  answer={answers[currentStep] || ''}
-                  onAnswerChange={handleAnswerChange}
-                  onNext={handleNext}
-                  onPrev={handlePrev}
-                />
-              ) : null}
+                    return (
+                      <div key={lineIndex}>
+                        <div className="flex items-center gap-2 py-1 group min-h-[32px]">
+                          <div className="flex-1 text-sm text-gray-800 leading-relaxed">
+                            {hasOverride ? (
+                              <span className="bg-indigo-50 text-indigo-800 text-sm px-1.5 py-0.5 rounded">
+                                {sentenceOverrides[lineIndex]}
+                              </span>
+                            ) : (
+                              <span>
+                                {parts.map((part, partIdx) => {
+                                  if (part.type === 'text') return <span key={partIdx}>{part.content}</span>;
+                                  const isEditing =
+                                    editingTagKey?.lineIndex === lineIndex &&
+                                    editingTagKey?.partIndex === partIdx;
+                                  const tagInfo = templateData.tags.find((t) => t.tag === part.tag);
+                                  return (
+                                    <TagChip
+                                      key={partIdx}
+                                      tag={part.tag}
+                                      value={tagValues[part.tag] || ''}
+                                      info={tagInfo}
+                                      isEditing={isEditing}
+                                      onClick={() => handleTagClick(lineIndex, partIdx)}
+                                      onChange={(val) => handleTagChange(part.tag, val)}
+                                      onBlur={handleTagBlur}
+                                    />
+                                  );
+                                })}
+                              </span>
+                            )}
+                          </div>
+                          {sentenceData && (
+                            <button
+                              onClick={() => handleSentenceEdit(lineIndex)}
+                              className={`flex-shrink-0 text-[10px] px-1.5 py-0.5 rounded border transition-colors whitespace-nowrap ${
+                                isEditingThis
+                                  ? 'bg-indigo-100 text-indigo-700 border-indigo-300'
+                                  : 'bg-gray-50 text-gray-400 border-gray-200 hover:bg-gray-100 hover:text-gray-600'
+                              }`}
+                            >
+                              {isEditingThis ? '닫기' : '문장 수정'}
+                            </button>
+                          )}
+                        </div>
+
+                        {isEditingThis && sentenceData && (
+                          <SentenceEditPanel
+                            sentence={sentenceData}
+                            filledTags={tagValues}
+                            onApply={(text) => handleSentenceApply(lineIndex, text)}
+                            onClose={() => setEditingSentenceIndex(null)}
+                            onReset={() => handleSentenceReset(lineIndex)}
+                            hasOverride={hasOverride}
+                          />
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Completed script preview */}
+              <div className="bg-gray-50 border border-gray-200 rounded-xl p-4">
+                <div className="flex items-center justify-between mb-2">
+                  <p className="text-[11px] font-bold text-gray-400 uppercase tracking-wider">완성된 대본 미리보기</p>
+                  {hasUnfilledTags && (
+                    <span className="text-[10px] text-amber-500 font-medium">빈 태그 있음</span>
+                  )}
+                </div>
+                <p className="text-sm text-gray-800 leading-relaxed whitespace-pre-wrap">{completedScript}</p>
+              </div>
+
+              {/* Copy + Save */}
+              <div className="flex gap-2">
+                <button
+                  onClick={handleCopy}
+                  className="flex-1 flex items-center justify-center gap-1.5 text-sm text-indigo-600 border border-indigo-300 hover:bg-indigo-50 font-semibold py-2.5 rounded-xl transition-colors"
+                >
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                  </svg>
+                  {copied ? '복사됨 ✓' : '복사'}
+                </button>
+                <button
+                  onClick={handleSave}
+                  disabled={saving || saved}
+                  className={`flex-1 flex items-center justify-center gap-1.5 text-sm font-semibold py-2.5 rounded-xl transition-colors ${
+                    saved
+                      ? 'bg-emerald-50 text-emerald-600 border border-emerald-200 cursor-default'
+                      : saving
+                      ? 'bg-gray-100 text-gray-400 cursor-wait'
+                      : 'bg-indigo-600 hover:bg-indigo-700 text-white'
+                  }`}
+                >
+                  {saved ? (
+                    <>
+                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                      </svg>
+                      저장됨
+                    </>
+                  ) : saving ? (
+                    <>
+                      <div className="w-4 h-4 border-2 border-gray-400 border-t-transparent rounded-full animate-spin" />
+                      저장 중...
+                    </>
+                  ) : (
+                    <>
+                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4" />
+                      </svg>
+                      보관함에 저장
+                    </>
+                  )}
+                </button>
+              </div>
             </div>
           )}
         </div>
