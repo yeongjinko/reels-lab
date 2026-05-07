@@ -943,7 +943,7 @@ const GENERATE_SENTENCE_VARIANTS_PROMPT = `너는 릴스 스크립트 작성 전
 { "variants": ["변형1", "변형2", "변형3"] }`;
 
 const SUGGEST_TAG_VALUE_PROMPT = `너는 릴스 대본 전문가야.
-어떤 상황에서도 반드시 JSON만 반환해. 입력이 불완전해도 JSON 외 텍스트 절대 출력 금지.`;
+어떤 상황에서도 반드시 JSON만 반환해. JSON 외 텍스트 절대 출력 금지.`;
 
 exports.generateSentenceVariants = onCall(
   { secrets: [anthropicApiKey], cors: true },
@@ -984,35 +984,30 @@ exports.suggestTagValue = onCall(
   { secrets: [anthropicApiKey], cors: true },
   async (request) => {
     if (!request.auth) throw new HttpsError('unauthenticated', '로그인이 필요합니다.');
-    const { tagName, tagDescription, fullTemplate, empathyPoint, sentence } = request.data;
+    const { tagName, tagDescription, fullTemplate, empathyPoint, sentence, userAnswer } = request.data;
     if (!tagName) throw new HttpsError('invalid-argument', '태그명이 필요합니다.');
 
     const client = new Anthropic({ apiKey: anthropicApiKey.value() });
-    const sentenceLine = sentence
-      ? `이 태그가 있는 문장: ${sentence}`
-      : `이 태그가 있는 문장: (정보 없음 — 전체 대본 맥락으로 추천해줘)`;
-    const userContent = `전체 대본: ${fullTemplate || '(없음)'}
-${sentenceLine}
+    let userContent = `전체 대본을 읽고 빈칸에 들어갈 말을 추천해줘.
+전체 대본: ${fullTemplate || '(없음)'}
+빈칸 문장: ${sentence || '(정보 없음)'}`;
 
-아래 순서대로 생각해:
-
-STEP 1. 이 대본에서 판매/소개하는 핵심 상품이나 주제가 뭔지 한 줄로
-STEP 2. 이 문장이 전체 대본에서 하는 역할이 뭔지 한 줄로
-STEP 3. 이 역할을 수행하려면 이 자리에 어떤 종류의 값이 와야 하는지
-STEP 4. 그 종류에 맞는 구체적인 추천값 3개
-
-입력이 불완전해도 반드시 아래 JSON만 반환:
-{
-  "step1_product": "파악한 상품/주제",
-  "step2_role": "이 문장의 역할",
-  "step3_type": "이 자리에 와야 할 값의 종류",
-  "suggestions": [
-    {
-      "value": "추천값",
-      "reason": "이유"
+    if (userAnswer) {
+      userContent += `\n사용자 답변: ${userAnswer}`;
     }
-  ]
-}`;
+
+    userContent += `
+
+맥락을 충분히 파악할 수 있으면 바로 추천.
+파악이 불확실하면 추천 대신 사용자에게 질문 하나만 던져.
+
+반드시 JSON만 반환:
+
+확실할 때:
+{ "needsQuestion": false, "suggestions": [{ "value": "추천값", "reason": "이유" }] }
+
+불확실할 때:
+{ "needsQuestion": true, "question": "질문 한 개", "options": ["선택지1", "선택지2", "선택지3"] }`;
 
     const messages = [{ role: 'user', content: userContent }];
     const tools = [{ type: 'web_search_20250305', name: 'web_search' }];

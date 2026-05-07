@@ -109,11 +109,14 @@ function InlineTagEdit({ tag, josa, value, isEditing, onStartEdit, onSave, onReq
 
 // ─── TagSuggestionPanel ────────────────────────────────────────────────────────
 
-function TagSuggestionPanel({ loading, suggestions, error, onApply, onClose }) {
+function TagSuggestionPanel({ loading, suggestions, error, onApply, onClose, question, questionOptions, onAnswerQuestion }) {
+  const hasQuestion = Boolean(question);
   return (
     <div className="mt-1 mb-2 bg-sky-50 border border-sky-200 rounded-xl p-3">
       <div className="flex items-center justify-between mb-2">
-        <span className="text-[11px] font-bold text-sky-700">트렌드 추천</span>
+        <span className="text-[11px] font-bold text-sky-700">
+          {hasQuestion ? '맥락 파악 질문' : '추천'}
+        </span>
         <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
           <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -123,10 +126,25 @@ function TagSuggestionPanel({ loading, suggestions, error, onApply, onClose }) {
       {loading ? (
         <div className="flex items-center gap-2 py-1">
           <div className="w-3 h-3 border-2 border-sky-400 border-t-transparent rounded-full animate-spin" />
-          <span className="text-xs text-gray-400">트렌드 검색 중...</span>
+          <span className="text-xs text-gray-400">분석 중...</span>
         </div>
       ) : error ? (
         <p className="text-xs text-red-500">{error}</p>
+      ) : hasQuestion ? (
+        <>
+          <p className="text-xs text-gray-700 mb-2 leading-relaxed">{question}</p>
+          <div className="flex flex-col gap-1.5">
+            {(questionOptions || []).map((opt, i) => (
+              <button
+                key={i}
+                onClick={() => onAnswerQuestion(opt)}
+                className="text-left text-xs bg-white hover:bg-sky-100 border border-sky-200 rounded-lg px-3 py-2 transition-colors text-sky-800 font-medium"
+              >
+                {opt}
+              </button>
+            ))}
+          </div>
+        </>
       ) : suggestions.length > 0 ? (
         <div className="flex flex-col gap-1.5">
           {suggestions.map((s, i) => (
@@ -421,7 +439,9 @@ export default function ScriptPanel({ analysis, referenceText, referenceId, init
 
   // Tag suggestions
   const [suggestingTagKey, setSuggestingTagKey] = useState(null);
+  const [suggestingTagName, setSuggestingTagName] = useState('');
   const [suggestions, setSuggestions] = useState([]);
+  const [suggestionQuestion, setSuggestionQuestion] = useState(null);
   const [loadingSuggestions, setLoadingSuggestions] = useState(false);
   const [suggestionError, setSuggestionError] = useState('');
 
@@ -571,11 +591,13 @@ export default function ScriptPanel({ analysis, referenceText, referenceId, init
     setIsFullEditMode(false);
   }
 
-  async function handleRequestSuggestion(key, tagName) {
+  async function handleRequestSuggestion(key, tagName, userAnswer = '') {
     const lineIndex = parseInt(key.split('-')[0], 10);
     const sentence = effectiveTemplateLines[lineIndex] || '';
     setSuggestingTagKey(key);
+    setSuggestingTagName(tagName);
     setSuggestions([]);
+    setSuggestionQuestion(null);
     setLoadingSuggestions(true);
     setSuggestionError('');
     setEditingTagKey(null);
@@ -586,14 +608,25 @@ export default function ScriptPanel({ analysis, referenceText, referenceId, init
         tagInfo?.description || '',
         templateCompletedScript,
         templateData?.empathyPoint || '',
-        sentence
+        sentence,
+        userAnswer
       );
-      setSuggestions(data.suggestions || []);
+      if (data.needsQuestion) {
+        setSuggestionQuestion({ question: data.question, options: data.options || [] });
+      } else {
+        setSuggestions(data.suggestions || []);
+      }
     } catch {
       setSuggestionError('추천을 불러오는 중 오류가 발생했습니다.');
     } finally {
       setLoadingSuggestions(false);
     }
+  }
+
+  function handleAnswerQuestion(answer) {
+    if (!suggestingTagKey || !suggestingTagName) return;
+    setSuggestionQuestion(null);
+    handleRequestSuggestion(suggestingTagKey, suggestingTagName, answer);
   }
 
   function handleApplySuggestion(value) {
@@ -605,7 +638,9 @@ export default function ScriptPanel({ analysis, referenceText, referenceId, init
 
   function handleCloseSuggestion() {
     setSuggestingTagKey(null);
+    setSuggestingTagName('');
     setSuggestions([]);
+    setSuggestionQuestion(null);
     setSuggestionError('');
   }
 
@@ -832,6 +867,9 @@ export default function ScriptPanel({ analysis, referenceText, referenceId, init
                             error={suggestionError}
                             onApply={handleApplySuggestion}
                             onClose={handleCloseSuggestion}
+                            question={suggestionQuestion?.question}
+                            questionOptions={suggestionQuestion?.options}
+                            onAnswerQuestion={handleAnswerQuestion}
                           />
                         )}
 
