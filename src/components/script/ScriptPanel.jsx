@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from '../../firebase/config';
 import { useApp } from '../../App';
@@ -338,6 +338,62 @@ function QuestionModal({ hookType, empathyPoint, onComplete, onClose }) {
           )}
         </div>
       </div>
+    </div>
+  );
+}
+
+// ─── HighlightedTextarea ──────────────────────────────────────────────────────
+
+function HighlightedTextarea({ value, onChange, rows, placeholder }) {
+  const backdropRef = useRef(null);
+  const textareaRef = useRef(null);
+
+  function syncScroll() {
+    if (backdropRef.current && textareaRef.current) {
+      backdropRef.current.scrollTop = textareaRef.current.scrollTop;
+    }
+  }
+
+  const highlightedHtml = useMemo(() => {
+    const escaped = value
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;');
+    return escaped.replace(
+      /\[([^\]]*)\]/g,
+      '<mark style="background:rgba(253,224,71,0.55);border-radius:3px;color:transparent">[$1]</mark>'
+    ) + ' ';
+  }, [value]);
+
+  const sharedStyle = {
+    fontFamily: 'inherit',
+    fontSize: '0.875rem',
+    lineHeight: '1.625',
+    letterSpacing: 'normal',
+    whiteSpace: 'pre-wrap',
+    wordBreak: 'break-word',
+    overflowWrap: 'break-word',
+  };
+
+  return (
+    <div className="relative w-full border border-gray-200 rounded-lg bg-white overflow-hidden focus-within:ring-2 focus-within:ring-indigo-400">
+      <div
+        ref={backdropRef}
+        aria-hidden="true"
+        className="absolute inset-0 p-3 pointer-events-none overflow-hidden"
+        style={{ ...sharedStyle, color: 'transparent' }}
+        dangerouslySetInnerHTML={{ __html: highlightedHtml }}
+      />
+      <textarea
+        ref={textareaRef}
+        value={value}
+        onChange={onChange}
+        onScroll={syncScroll}
+        rows={rows}
+        placeholder={placeholder}
+        className="relative w-full p-3 bg-transparent text-sm text-gray-800 outline-none resize-none leading-relaxed"
+        style={{ caretColor: '#1f2937', ...sharedStyle }}
+      />
     </div>
   );
 }
@@ -709,11 +765,10 @@ export default function ScriptPanel({ analysis, referenceText, referenceId, init
               </div>
 
               {isFullEditMode ? (
-                <textarea
+                <HighlightedTextarea
                   value={fullEditText}
                   onChange={(e) => setFullEditText(e.target.value)}
                   rows={Math.max(6, templateLines.length + 2)}
-                  className="w-full border border-gray-200 rounded-lg p-3 text-sm text-gray-800 outline-none focus:ring-2 focus:ring-indigo-400 resize-none leading-relaxed"
                   placeholder="대본을 자유롭게 수정하세요"
                 />
               ) : (
