@@ -165,68 +165,72 @@ function TagSuggestionPanel({ loading, suggestions, error, onApply, onClose, que
   );
 }
 
-// ─── ProductContextPanel ──────────────────────────────────────────────────────
+// ─── ProductContextModal ──────────────────────────────────────────────────────
 
-function ProductContextPanel({ loading, guesses, onConfirm, onClose }) {
+function ProductContextModal({ loading, guesses, onConfirm, onClose }) {
   const [inputVal, setInputVal] = useState('');
   const [selected, setSelected] = useState('');
 
   const answer = selected || inputVal.trim();
 
   return (
-    <div className="mt-1 mb-2 bg-violet-50 border border-violet-200 rounded-xl p-3">
-      <div className="flex items-center justify-between mb-2">
-        <span className="text-[11px] font-bold text-violet-700">정확한 추천을 위해 확인할게요</span>
-        <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
-          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-          </svg>
-        </button>
-      </div>
-      {loading ? (
-        <div className="flex items-center gap-2 py-1">
-          <div className="w-3 h-3 border-2 border-violet-400 border-t-transparent rounded-full animate-spin" />
-          <span className="text-xs text-gray-400">상품 파악 중...</span>
-        </div>
-      ) : (
-        <>
-          <p className="text-xs text-gray-500 mb-2">혹시 소개하는 상품이 이건가요?</p>
-          {guesses.length > 0 && (
-            <div className="flex flex-wrap gap-1.5 mb-2.5">
-              {guesses.map((g, i) => (
-                <button
-                  key={i}
-                  onClick={() => { setSelected(g); setInputVal(''); }}
-                  className={`text-xs px-2.5 py-1 rounded-full border transition-colors ${
-                    selected === g
-                      ? 'bg-violet-600 text-white border-violet-600'
-                      : 'bg-white text-violet-700 border-violet-200 hover:bg-violet-100'
-                  }`}
-                >
-                  {g}
-                </button>
-              ))}
-            </div>
-          )}
-          <input
-            value={inputVal}
-            onChange={(e) => { setInputVal(e.target.value); setSelected(''); }}
-            placeholder="직접 입력..."
-            className="w-full text-xs border border-gray-200 rounded-lg px-3 py-2 mb-2 outline-none focus:ring-1 focus:ring-violet-400"
-          />
-          <button
-            onClick={() => answer && onConfirm(answer)}
-            disabled={!answer}
-            className={`w-full text-xs font-semibold py-2 rounded-lg transition-colors ${
-              answer
-                ? 'bg-violet-600 hover:bg-violet-700 text-white'
-                : 'bg-gray-100 text-gray-400 cursor-not-allowed'
-            }`}
-          >
-            이걸로 추천받기
+    <div className="fixed inset-0 bg-black/50 flex items-end sm:items-center justify-center z-50 p-0 sm:p-4">
+      <div className="bg-white rounded-t-2xl sm:rounded-2xl shadow-xl w-full sm:max-w-sm flex flex-col">
+        <div className="flex items-center justify-between px-5 pt-5 pb-3 border-b border-gray-100">
+          <h3 className="font-bold text-gray-900 text-sm">정확한 추천을 위해 확인할게요</h3>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 p-1">
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
           </button>
-        </>
-      )}
+        </div>
+        <div className="p-5">
+          {loading ? (
+            <div className="flex items-center gap-2 py-6 justify-center">
+              <div className="w-4 h-4 border-2 border-violet-400 border-t-transparent rounded-full animate-spin" />
+              <span className="text-sm text-gray-400">상품 파악 중...</span>
+            </div>
+          ) : (
+            <>
+              <p className="text-sm text-gray-600 mb-3">혹시 소개하는 상품이 이건가요?</p>
+              {guesses.length > 0 && (
+                <div className="flex flex-wrap gap-2 mb-4">
+                  {guesses.map((g, i) => (
+                    <button
+                      key={i}
+                      onClick={() => { setSelected(g); setInputVal(''); }}
+                      className={`text-sm px-3 py-1.5 rounded-full border transition-colors ${
+                        selected === g
+                          ? 'bg-violet-600 text-white border-violet-600'
+                          : 'bg-white text-violet-700 border-violet-200 hover:bg-violet-50'
+                      }`}
+                    >
+                      {g}
+                    </button>
+                  ))}
+                </div>
+              )}
+              <input
+                value={inputVal}
+                onChange={(e) => { setInputVal(e.target.value); setSelected(''); }}
+                placeholder="직접 입력..."
+                className="w-full text-sm border border-gray-200 rounded-xl px-4 py-2.5 mb-4 outline-none focus:ring-2 focus:ring-violet-400"
+              />
+              <button
+                onClick={() => answer && onConfirm(answer)}
+                disabled={!answer}
+                className={`w-full text-sm font-semibold py-3 rounded-xl transition-colors ${
+                  answer
+                    ? 'bg-violet-600 hover:bg-violet-700 text-white'
+                    : 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                }`}
+              >
+                이걸로 추천받기
+              </button>
+            </>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
@@ -511,7 +515,8 @@ export default function ScriptPanel({ analysis, referenceText, referenceId, init
   const [loadingSuggestions, setLoadingSuggestions] = useState(false);
   const [suggestionError, setSuggestionError] = useState('');
 
-  // Product context popup (before suggestion)
+  // Product context modal (before suggestion)
+  const [isProductContextOpen, setIsProductContextOpen] = useState(false);
   const [contextPopupKey, setContextPopupKey] = useState(null);
   const [productGuesses, setProductGuesses] = useState([]);
   const [loadingGuesses, setLoadingGuesses] = useState(false);
@@ -596,6 +601,7 @@ export default function ScriptPanel({ analysis, referenceText, referenceId, init
     setEditedTemplateLines({});
     setSuggestingTagKey(null);
     setSuggestions([]);
+    setIsProductContextOpen(false);
     setContextPopupKey(null);
     setProductGuesses([]);
     setSaved(false);
@@ -630,6 +636,7 @@ export default function ScriptPanel({ analysis, referenceText, referenceId, init
     setEditingTagKey(null);
     setSuggestingTagKey(null);
     setSuggestions([]);
+    setIsProductContextOpen(false);
     setContextPopupKey(null);
     setProductGuesses([]);
   }
@@ -654,6 +661,7 @@ export default function ScriptPanel({ analysis, referenceText, referenceId, init
     setEditingTagKey(null);
     setSuggestingTagKey(null);
     setSuggestions([]);
+    setIsProductContextOpen(false);
     setContextPopupKey(null);
     setProductGuesses([]);
   }
@@ -707,6 +715,7 @@ export default function ScriptPanel({ analysis, referenceText, referenceId, init
   }
 
   async function handleOpenContextPopup(key, tagName) {
+    setIsProductContextOpen(true);
     setContextPopupKey(key);
     setSuggestingTagName(tagName);
     setSuggestingTagKey(null);
@@ -729,6 +738,7 @@ export default function ScriptPanel({ analysis, referenceText, referenceId, init
   function handleConfirmContext(answer) {
     const key = contextPopupKey;
     const tagName = suggestingTagName;
+    setIsProductContextOpen(false);
     setContextPopupKey(null);
     setProductGuesses([]);
     handleRequestSuggestion(key, tagName, answer);
@@ -742,6 +752,7 @@ export default function ScriptPanel({ analysis, referenceText, referenceId, init
   }
 
   function handleCloseSuggestion() {
+    setIsProductContextOpen(false);
     setSuggestingTagKey(null);
     setSuggestingTagName('');
     setSuggestions([]);
@@ -784,12 +795,6 @@ export default function ScriptPanel({ analysis, referenceText, referenceId, init
     return parseInt(li, 10) === lineIndex ? suggestingTagKey : null;
   }
 
-  function getContextKeyForLine(lineIndex) {
-    if (!contextPopupKey) return null;
-    const [li] = contextPopupKey.split('-');
-    return parseInt(li, 10) === lineIndex ? contextPopupKey : null;
-  }
-
   return (
     <>
       {toast && (
@@ -799,6 +804,15 @@ export default function ScriptPanel({ analysis, referenceText, referenceId, init
           </svg>
           {toast}
         </div>
+      )}
+
+      {isProductContextOpen && (
+        <ProductContextModal
+          loading={loadingGuesses}
+          guesses={productGuesses}
+          onConfirm={handleConfirmContext}
+          onClose={handleCloseSuggestion}
+        />
       )}
 
       {showQuestionModal && (
@@ -932,7 +946,6 @@ export default function ScriptPanel({ analysis, referenceText, referenceId, init
                     const prevSentence = scriptLines[lineIndex - 1] || '';
                     const nextSentence = scriptLines[lineIndex + 1] || '';
                     const activeSuggestionKey = getSuggestionKeyForLine(lineIndex);
-                    const activeContextKey = getContextKeyForLine(lineIndex);
                     let tagIdxInLine = 0;
 
                     return (
@@ -972,15 +985,6 @@ export default function ScriptPanel({ analysis, referenceText, referenceId, init
                             </button>
                           )}
                         </div>
-
-                        {activeContextKey && (
-                          <ProductContextPanel
-                            loading={loadingGuesses}
-                            guesses={productGuesses}
-                            onConfirm={handleConfirmContext}
-                            onClose={handleCloseSuggestion}
-                          />
-                        )}
 
                         {activeSuggestionKey && (
                           <TagSuggestionPanel
