@@ -1067,3 +1067,37 @@ exports.suggestTagValue = onCall(
     }
   }
 );
+
+exports.guessProduct = onCall(
+  { secrets: [anthropicApiKey], cors: true },
+  async (request) => {
+    if (!request.auth) throw new HttpsError('unauthenticated', '로그인이 필요합니다.');
+    const { fullTemplate } = request.data;
+    if (!fullTemplate) throw new HttpsError('invalid-argument', '전체 대본이 필요합니다.');
+
+    const client = new Anthropic({ apiKey: anthropicApiKey.value() });
+    try {
+      const message = await client.messages.create({
+        model: MODEL,
+        max_tokens: 256,
+        system: '너는 릴스 대본 분석 전문가야. 어떤 상황에서도 반드시 JSON만 반환해. JSON 외 텍스트 절대 출력 금지.',
+        messages: [{
+          role: 'user',
+          content: `아래 대본을 읽고 소개하는 상품/서비스가 무엇인지 후보 3개를 추측해줘. 각 후보는 짧게 2~6글자로.
+
+대본:
+${fullTemplate}
+
+반드시 JSON만 반환:
+{ "guesses": ["후보1", "후보2", "후보3"] }`,
+        }],
+      });
+      const result = parseJsonFromText(message.content[0].text);
+      return { success: true, data: result };
+    } catch (e) {
+      console.error('guessProduct error:', e?.message || e);
+      if (e instanceof HttpsError) throw e;
+      throw new HttpsError('internal', '상품 추측 중 오류가 발생했습니다.');
+    }
+  }
+);

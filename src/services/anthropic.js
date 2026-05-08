@@ -14,6 +14,7 @@ const generateFinalScriptFn = httpsCallable(functions, 'generateFinalScript', { 
 const generateQuestionsFn = httpsCallable(functions, 'generateQuestions');
 const generateSentenceVariantsFn = httpsCallable(functions, 'generateSentenceVariants');
 const suggestTagValueFn = httpsCallable(functions, 'suggestTagValue');
+const guessProductFn = httpsCallable(functions, 'guessProduct');
 
 export async function analyzeReference(text) {
   const result = await analyzeScriptFn({ text });
@@ -68,4 +69,9 @@ export async function generateSentenceVariants(sentence, role, effect, filledTag
 export async function suggestTagValue(tagName, tagDescription, fullTemplate, empathyPoint, sentence = '', userAnswer = '') {
   const result = await suggestTagValueFn({ tagName, tagDescription, fullTemplate, empathyPoint, sentence, userAnswer });
   return result.data.data; // { needsQuestion, suggestions? | question?, options? }
+}
+
+export async function guessProduct(fullTemplate) {
+  const result = await guessProductFn({ fullTemplate });
+  return result.data.data; // { guesses: [] }
 }
