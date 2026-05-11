@@ -1,10 +1,11 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   collection, addDoc, deleteDoc, updateDoc, doc,
   query, where, onSnapshot, serverTimestamp, getDocs,
 } from 'firebase/firestore';
+import { ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
 import { useNavigate } from 'react-router-dom';
-import { db } from '../../firebase/config';
+import { db, storage } from '../../firebase/config';
 import { useApp } from '../../App';
 
 const TAG_STYLES = {
@@ -31,19 +32,76 @@ function getTitle(script) {
   return lines[0]?.slice(0, 40) || '제목 없음';
 }
 
-function getBody(script) {
-  const lines = (script || '').split('\n').filter(l => l.trim());
-  return lines.slice(1).join('\n') || lines[0] || '';
-}
-
 const PencilIcon = () => (
   <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
   </svg>
 );
 
+/* ── 이미지 크게 보기 모달 ── */
+function ImageModal({ item, onClose }) {
+  return (
+    <div
+      className="fixed inset-0 bg-black/85 backdrop-blur-sm z-[60] flex items-center justify-center p-4"
+      onClick={onClose}
+    >
+      <div className="relative w-full max-w-2xl" onClick={e => e.stopPropagation()}>
+        <button
+          onClick={onClose}
+          className="absolute -top-10 right-0 text-white/70 hover:text-white transition-colors"
+        >
+          <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+          </svg>
+        </button>
+        <img
+          src={item.mediaUrl || item.thumbnailUrl}
+          alt={item.title}
+          className="w-full rounded-2xl shadow-2xl"
+          style={{ maxHeight: '80vh', objectFit: 'contain' }}
+        />
+        <p className="text-white/80 text-sm font-semibold mt-3 text-center truncate">
+          {item.title || getTitle(item.script)}
+        </p>
+      </div>
+    </div>
+  );
+}
+
+/* ── 영상 재생 모달 ── */
+function VideoModal({ item, onClose }) {
+  return (
+    <div
+      className="fixed inset-0 bg-black/85 backdrop-blur-sm z-[60] flex items-center justify-center p-4"
+      onClick={onClose}
+    >
+      <div className="relative w-full max-w-2xl" onClick={e => e.stopPropagation()}>
+        <button
+          onClick={onClose}
+          className="absolute -top-10 right-0 text-white/70 hover:text-white transition-colors"
+        >
+          <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+          </svg>
+        </button>
+        <video
+          src={item.mediaUrl || item.videoUrl}
+          controls
+          autoPlay
+          poster={item.thumbnailUrl}
+          className="w-full rounded-2xl shadow-2xl bg-black"
+          style={{ maxHeight: '80vh' }}
+        />
+        <p className="text-white/80 text-sm font-semibold mt-3 text-center truncate">
+          {item.title || getTitle(item.script)}
+        </p>
+      </div>
+    </div>
+  );
+}
+
 /* ── 상세 모달 ── */
-function DetailModal({ item, onClose, onGoAnalyze }) {
+function DetailModal({ item, onClose, onGoAnalyze, onPlayMedia }) {
   const [editingField, setEditingField] = useState(null);
   const [editValue, setEditValue] = useState('');
   const [saving, setSaving] = useState(false);
@@ -52,9 +110,7 @@ function DetailModal({ item, onClose, onGoAnalyze }) {
 
   useEffect(() => { setLocalItem(item); }, [item]);
 
-  function handleGoAnalyze() {
-    onGoAnalyze(localItem);
-  }
+  function handleGoAnalyze() { onGoAnalyze(localItem); }
 
   function startEdit(field) {
     setEditingField(field);
@@ -115,6 +171,10 @@ function DetailModal({ item, onClose, onGoAnalyze }) {
     );
   }
 
+  const isVideo = localItem.mediaType === 'video' || (!localItem.mediaType && localItem.videoUrl);
+  const isImage = localItem.mediaType === 'image';
+  const hasMedia = isVideo || isImage || localItem.mediaUrl || localItem.videoUrl;
+
   return (
     <div
       className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4"
@@ -128,7 +188,6 @@ function DetailModal({ item, onClose, onGoAnalyze }) {
         <div className="px-6 pt-5 pb-4 border-b border-gray-100 flex-shrink-0">
           <div className="flex items-start justify-between gap-3">
             <div className="flex-1 min-w-0">
-              {/* 상태 뱃지 */}
               <div className="flex flex-wrap items-center gap-2 mb-1.5">
                 <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full flex-shrink-0 ${localItem.analyzed ? 'bg-emerald-100 text-emerald-700' : 'bg-gray-100 text-gray-500'}`}>
                   {localItem.analyzed ? '분석완료' : '미분석'}
@@ -142,7 +201,6 @@ function DetailModal({ item, onClose, onGoAnalyze }) {
                   <span className="text-[11px] text-gray-400 ml-auto">{formatAnalyzedAt(localItem.analyzedAt)}</span>
                 )}
               </div>
-              {/* 제목 */}
               {editingField === 'title' ? (
                 <div className="flex items-center gap-2 mb-1">
                   <input
@@ -162,7 +220,6 @@ function DetailModal({ item, onClose, onGoAnalyze }) {
                   </button>
                 </div>
               )}
-              {/* 링크 */}
               {editingField === 'link' ? (
                 <div className="flex items-center gap-2 mt-1">
                   <input
@@ -205,6 +262,36 @@ function DetailModal({ item, onClose, onGoAnalyze }) {
 
         {/* 콘텐츠 */}
         <div className="flex-1 overflow-y-auto px-6 py-5 flex flex-col gap-5">
+          {/* 미디어 프리뷰 */}
+          {hasMedia && (
+            <div
+              className="relative bg-black rounded-xl overflow-hidden cursor-pointer group"
+              style={{ aspectRatio: '16/9' }}
+              onClick={onPlayMedia}
+            >
+              {localItem.thumbnailUrl ? (
+                <img src={localItem.thumbnailUrl} alt="" className="w-full h-full object-cover" />
+              ) : (
+                <div className="w-full h-full bg-gray-900" />
+              )}
+              <div className="absolute inset-0 flex items-center justify-center bg-black/30 group-hover:bg-black/40 transition-colors">
+                {isVideo ? (
+                  <div className="w-14 h-14 bg-white/90 rounded-full flex items-center justify-center shadow-xl">
+                    <svg className="w-6 h-6 text-gray-800 ml-1" fill="currentColor" viewBox="0 0 24 24">
+                      <path d="M8 5v14l11-7z" />
+                    </svg>
+                  </div>
+                ) : (
+                  <div className="w-14 h-14 bg-white/90 rounded-full flex items-center justify-center shadow-xl">
+                    <svg className="w-6 h-6 text-gray-800" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0zM10 7v3m0 0v3m0-3h3m-3 0H7" />
+                    </svg>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
           {/* 대본 수정 알림 */}
           {scriptResetBanner && (
             <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 flex items-center justify-between gap-3">
@@ -352,24 +439,43 @@ function DetailModal({ item, onClose, onGoAnalyze }) {
   );
 }
 
-/* ── 폴더 사이드바 ── */
-function FolderSidebar({ folders, items, selectedFolderId, onSelect, onCreateFolder, onRenameFolder, onDeleteFolder }) {
-  const [showInput, setShowInput] = useState(false);
+/* ── 폴더 사이드바 (2단계 지원) ── */
+function FolderSidebar({
+  folders, items, selectedFolderId, onSelect,
+  onCreateFolder, onRenameFolder, onDeleteFolder,
+}) {
+  const [showRootInput, setShowRootInput] = useState(false);
+  const [showSubInput, setShowSubInput] = useState(null); // parentId
   const [newName, setNewName] = useState('');
   const [editingId, setEditingId] = useState(null);
   const [editingName, setEditingName] = useState('');
+  const [expandedIds, setExpandedIds] = useState(new Set());
+
+  const rootFolders = folders.filter(f => !f.parentId);
+  const subFolders = (parentId) => folders.filter(f => f.parentId === parentId);
 
   function countInFolder(folderId) {
     if (folderId === null) return items.length;
     if (folderId === 'uncat') return items.filter(i => !i.folderId).length;
-    return items.filter(i => i.folderId === folderId).length;
+    const sub = folders.filter(f => f.parentId === folderId).map(f => f.id);
+    return items.filter(i => i.folderId === folderId || sub.includes(i.folderId)).length;
   }
 
-  async function submitCreate() {
-    if (!newName.trim()) { setShowInput(false); return; }
-    await onCreateFolder(newName.trim());
+  function toggleExpand(id, e) {
+    e.stopPropagation();
+    setExpandedIds(prev => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  }
+
+  async function submitCreate(parentId) {
+    if (!newName.trim()) { setShowRootInput(false); setShowSubInput(null); return; }
+    await onCreateFolder(newName.trim(), parentId || null);
     setNewName('');
-    setShowInput(false);
+    setShowRootInput(false);
+    setShowSubInput(null);
   }
 
   async function submitRename(id) {
@@ -382,8 +488,105 @@ function FolderSidebar({ folders, items, selectedFolderId, onSelect, onCreateFol
   const active = 'bg-indigo-50 text-indigo-700 font-semibold';
   const inactive = 'text-gray-600 hover:bg-gray-100';
 
+  function FolderRow({ folder, depth = 0 }) {
+    const subs = subFolders(folder.id);
+    const isExpanded = expandedIds.has(folder.id);
+    const isSelected = selectedFolderId === folder.id;
+    const isEditingThis = editingId === folder.id;
+
+    return (
+      <div>
+        <div className="group relative" style={{ paddingLeft: depth * 12 }}>
+          {isEditingThis ? (
+            <input
+              value={editingName}
+              onChange={e => setEditingName(e.target.value)}
+              onBlur={() => submitRename(folder.id)}
+              onKeyDown={e => {
+                if (e.key === 'Enter') submitRename(folder.id);
+                if (e.key === 'Escape') setEditingId(null);
+              }}
+              autoFocus
+              className="w-full px-3 py-1.5 text-sm border border-indigo-400 rounded-lg outline-none bg-white"
+            />
+          ) : (
+            <button
+              onClick={() => { onSelect(folder.id); if (subs.length > 0) setExpandedIds(prev => { const n = new Set(prev); n.add(folder.id); return n; }); }}
+              onDoubleClick={() => { setEditingId(folder.id); setEditingName(folder.name); }}
+              className={`${btnBase} ${isSelected ? active : inactive} pr-1`}
+            >
+              <div className="flex items-center gap-1 flex-1 min-w-0">
+                {subs.length > 0 && (
+                  <button
+                    onClick={e => toggleExpand(folder.id, e)}
+                    className="flex-shrink-0 text-gray-400 hover:text-gray-600 transition-colors"
+                  >
+                    <svg className={`w-3 h-3 transition-transform ${isExpanded ? 'rotate-90' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                    </svg>
+                  </button>
+                )}
+                {subs.length === 0 && depth === 0 && <span className="w-3 flex-shrink-0" />}
+                <span className="truncate flex-1 text-left">{folder.name}</span>
+              </div>
+              <div className="flex items-center gap-1 flex-shrink-0">
+                <span className="text-xs bg-gray-200 text-gray-600 px-1.5 py-0.5 rounded-full">{countInFolder(folder.id)}</span>
+                <button
+                  onClick={e => { e.stopPropagation(); onDeleteFolder(folder.id); }}
+                  className="opacity-0 group-hover:opacity-100 text-gray-400 hover:text-red-400 transition-all w-5 h-5 flex items-center justify-center rounded"
+                >
+                  <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+            </button>
+          )}
+        </div>
+
+        {/* 하위 폴더 목록 */}
+        {isExpanded && subs.map(sub => (
+          <FolderRow key={sub.id} folder={sub} depth={depth + 1} />
+        ))}
+
+        {/* 하위 폴더 입력 */}
+        {isExpanded && showSubInput === folder.id && (
+          <div style={{ paddingLeft: (depth + 1) * 12 + 12 }}>
+            <input
+              value={newName}
+              onChange={e => setNewName(e.target.value)}
+              onBlur={() => submitCreate(folder.id)}
+              onKeyDown={e => {
+                if (e.key === 'Enter') submitCreate(folder.id);
+                if (e.key === 'Escape') { setShowSubInput(null); setNewName(''); }
+              }}
+              placeholder="하위 폴더 이름"
+              autoFocus
+              className="w-full px-3 py-1.5 text-sm border border-indigo-400 rounded-lg outline-none bg-white"
+            />
+          </div>
+        )}
+
+        {/* 폴더 선택 상태에서 "+ 하위 폴더" 버튼 */}
+        {isSelected && depth === 0 && !showSubInput && (
+          <div style={{ paddingLeft: 12 + 12 }}>
+            <button
+              onClick={() => { setExpandedIds(prev => { const n = new Set(prev); n.add(folder.id); return n; }); setShowSubInput(folder.id); setNewName(''); }}
+              className="w-full flex items-center gap-1 px-3 py-1.5 text-xs text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors"
+            >
+              <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+              </svg>
+              하위 폴더 만들기
+            </button>
+          </div>
+        )}
+      </div>
+    );
+  }
+
   return (
-    <div className="w-48 flex-shrink-0 border-r border-gray-200 bg-gray-50 flex flex-col overflow-y-auto">
+    <div className="w-52 flex-shrink-0 border-r border-gray-200 bg-gray-50 flex flex-col overflow-y-auto">
       <div className="p-2 flex flex-col gap-0.5">
         <button onClick={() => onSelect(null)} className={`${btnBase} ${selectedFolderId === null ? active : inactive}`}>
           <span>전체보기</span>
@@ -394,54 +597,21 @@ function FolderSidebar({ folders, items, selectedFolderId, onSelect, onCreateFol
           <span className="text-xs bg-gray-200 text-gray-600 px-1.5 py-0.5 rounded-full">{countInFolder('uncat')}</span>
         </button>
 
-        {folders.length > 0 && <div className="border-t border-gray-200 my-1" />}
+        {rootFolders.length > 0 && <div className="border-t border-gray-200 my-1" />}
 
-        {folders.map(folder => (
-          <div key={folder.id} className="group relative">
-            {editingId === folder.id ? (
-              <input
-                value={editingName}
-                onChange={e => setEditingName(e.target.value)}
-                onBlur={() => submitRename(folder.id)}
-                onKeyDown={e => {
-                  if (e.key === 'Enter') submitRename(folder.id);
-                  if (e.key === 'Escape') setEditingId(null);
-                }}
-                autoFocus
-                className="w-full px-3 py-1.5 text-sm border border-indigo-400 rounded-lg outline-none bg-white"
-              />
-            ) : (
-              <button
-                onClick={() => onSelect(folder.id)}
-                onDoubleClick={() => { setEditingId(folder.id); setEditingName(folder.name); }}
-                className={`${btnBase} ${selectedFolderId === folder.id ? active : inactive} pr-1`}
-              >
-                <span className="truncate flex-1 text-left">{folder.name}</span>
-                <div className="flex items-center gap-1 flex-shrink-0">
-                  <span className="text-xs bg-gray-200 text-gray-600 px-1.5 py-0.5 rounded-full">{countInFolder(folder.id)}</span>
-                  <button
-                    onClick={e => { e.stopPropagation(); onDeleteFolder(folder.id); }}
-                    className="opacity-0 group-hover:opacity-100 text-gray-400 hover:text-red-400 transition-all w-5 h-5 flex items-center justify-center rounded"
-                  >
-                    <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                    </svg>
-                  </button>
-                </div>
-              </button>
-            )}
-          </div>
+        {rootFolders.map(folder => (
+          <FolderRow key={folder.id} folder={folder} depth={0} />
         ))}
 
         <div className="mt-1">
-          {showInput ? (
+          {showRootInput ? (
             <input
               value={newName}
               onChange={e => setNewName(e.target.value)}
-              onBlur={submitCreate}
+              onBlur={() => submitCreate(null)}
               onKeyDown={e => {
-                if (e.key === 'Enter') submitCreate();
-                if (e.key === 'Escape') { setShowInput(false); setNewName(''); }
+                if (e.key === 'Enter') submitCreate(null);
+                if (e.key === 'Escape') { setShowRootInput(false); setNewName(''); }
               }}
               placeholder="폴더 이름"
               autoFocus
@@ -449,7 +619,7 @@ function FolderSidebar({ folders, items, selectedFolderId, onSelect, onCreateFol
             />
           ) : (
             <button
-              onClick={() => setShowInput(true)}
+              onClick={() => setShowRootInput(true)}
               className="w-full flex items-center gap-1.5 px-3 py-2 text-xs text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors"
             >
               <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -464,6 +634,78 @@ function FolderSidebar({ folders, items, selectedFolderId, onSelect, onCreateFol
   );
 }
 
+/* ── breadcrumb ── */
+function Breadcrumb({ folders, selectedFolderId, onSelect }) {
+  if (!selectedFolderId || selectedFolderId === 'uncat') {
+    return (
+      <nav className="flex items-center gap-1 text-xs text-gray-500 mb-3">
+        <button onClick={() => onSelect(null)} className="hover:text-indigo-600 transition-colors font-medium">전체</button>
+        {selectedFolderId === 'uncat' && (
+          <>
+            <svg className="w-3 h-3 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+            </svg>
+            <span className="text-gray-700 font-semibold">미분류</span>
+          </>
+        )}
+      </nav>
+    );
+  }
+
+  const folder = folders.find(f => f.id === selectedFolderId);
+  if (!folder) return null;
+
+  const crumbs = [folder];
+  let cur = folder;
+  while (cur.parentId) {
+    const parent = folders.find(f => f.id === cur.parentId);
+    if (!parent) break;
+    crumbs.unshift(parent);
+    cur = parent;
+  }
+
+  return (
+    <nav className="flex items-center gap-1 text-xs text-gray-500 mb-3 flex-wrap">
+      <button onClick={() => onSelect(null)} className="hover:text-indigo-600 transition-colors font-medium">전체</button>
+      {crumbs.map((c, i) => (
+        <React.Fragment key={c.id}>
+          <svg className="w-3 h-3 text-gray-300 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+          </svg>
+          {i < crumbs.length - 1 ? (
+            <button onClick={() => onSelect(c.id)} className="hover:text-indigo-600 transition-colors">{c.name}</button>
+          ) : (
+            <span className="text-gray-700 font-semibold">{c.name}</span>
+          )}
+        </React.Fragment>
+      ))}
+    </nav>
+  );
+}
+
+/* ── 비디오 썸네일 생성 ── */
+async function generateVideoThumbnail(file) {
+  return new Promise((resolve) => {
+    const video = document.createElement('video');
+    video.preload = 'metadata';
+    video.playsInline = true;
+    video.muted = true;
+    const url = URL.createObjectURL(file);
+    video.src = url;
+    video.onloadeddata = () => { video.currentTime = 0; };
+    video.onseeked = () => {
+      const canvas = document.createElement('canvas');
+      const maxW = 640;
+      canvas.width = Math.min(video.videoWidth || maxW, maxW);
+      canvas.height = Math.round((canvas.width / (video.videoWidth || maxW)) * (video.videoHeight || 360));
+      canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height);
+      URL.revokeObjectURL(url);
+      canvas.toBlob(blob => resolve(blob || null), 'image/jpeg', 0.8);
+    };
+    video.onerror = () => { URL.revokeObjectURL(url); resolve(null); };
+  });
+}
+
 /* ── 메인 페이지 ── */
 export default function LibraryPage() {
   const { user } = useApp();
@@ -474,6 +716,7 @@ export default function LibraryPage() {
   const [folders, setFolders] = useState([]);
   const [selectedFolderId, setSelectedFolderId] = useState(null);
   const [detailItem, setDetailItem] = useState(null);
+  const [mediaModalItem, setMediaModalItem] = useState(null);
 
   function handleGoAnalyze(item) {
     sessionStorage.setItem('pendingLibraryItem', JSON.stringify({
@@ -492,9 +735,13 @@ export default function LibraryPage() {
   const [formTitle, setFormTitle] = useState('');
   const [formLink, setFormLink] = useState('');
   const [formScript, setFormScript] = useState('');
+  const [formMediaFile, setFormMediaFile] = useState(null);
+  const [formMediaType, setFormMediaType] = useState(null); // 'image' | 'video'
+  const [uploadProgress, setUploadProgress] = useState(0);
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(null);
   const [movingItemId, setMovingItemId] = useState(null);
+  const mediaInputRef = useRef(null);
 
   useEffect(() => {
     if (!movingItemId) return;
@@ -505,14 +752,12 @@ export default function LibraryPage() {
 
   useEffect(() => {
     if (!user) { setItemsLoading(false); return; }
-    console.log('[LibraryPage] loading items for uid:', user.uid);
     setItemsLoading(true);
     let settled = false;
     const finish = () => { if (!settled) { settled = true; setItemsLoading(false); } };
     const q = query(collection(db, 'referenceLibrary'), where('userId', '==', user.uid));
     const unsub = onSnapshot(q,
       (snap) => {
-        console.log('[LibraryPage] items snapshot:', snap.docs.length);
         setItems(snap.docs
           .map(d => ({ id: d.id, ...d.data() }))
           .sort((a, b) => (b.createdAt?.seconds ?? 0) - (a.createdAt?.seconds ?? 0)));
@@ -539,12 +784,18 @@ export default function LibraryPage() {
   const filteredItems = useMemo(() => {
     if (selectedFolderId === null) return items;
     if (selectedFolderId === 'uncat') return items.filter(i => !i.folderId);
-    return items.filter(i => i.folderId === selectedFolderId);
-  }, [items, selectedFolderId]);
+    const subIds = folders.filter(f => f.parentId === selectedFolderId).map(f => f.id);
+    return items.filter(i => i.folderId === selectedFolderId || subIds.includes(i.folderId));
+  }, [items, selectedFolderId, folders]);
 
-  async function handleCreateFolder(name) {
+  async function handleCreateFolder(name, parentId = null) {
     if (!user) return;
-    await addDoc(collection(db, 'referenceFolders'), { userId: user.uid, name, createdAt: serverTimestamp() });
+    await addDoc(collection(db, 'referenceFolders'), {
+      userId: user.uid,
+      name,
+      parentId: parentId || null,
+      createdAt: serverTimestamp(),
+    });
   }
 
   async function handleRenameFolder(id, name) {
@@ -553,11 +804,15 @@ export default function LibraryPage() {
 
   async function handleDeleteFolder(id) {
     if (!confirm('폴더를 삭제할까요? 안의 카드는 미분류로 이동합니다.')) return;
-    const q = query(collection(db, 'referenceLibrary'), where('folderId', '==', id));
-    const snap = await getDocs(q);
-    await Promise.all(snap.docs.map(d => updateDoc(doc(db, 'referenceLibrary', d.id), { folderId: null })));
-    await deleteDoc(doc(db, 'referenceFolders', id));
-    if (selectedFolderId === id) setSelectedFolderId(null);
+    const subFolderIds = folders.filter(f => f.parentId === id).map(f => f.id);
+    const allFolderIds = [id, ...subFolderIds];
+    for (const fid of allFolderIds) {
+      const q = query(collection(db, 'referenceLibrary'), where('folderId', '==', fid));
+      const snap = await getDocs(q);
+      await Promise.all(snap.docs.map(d => updateDoc(doc(db, 'referenceLibrary', d.id), { folderId: null })));
+      await deleteDoc(doc(db, 'referenceFolders', fid));
+    }
+    if (allFolderIds.includes(selectedFolderId)) setSelectedFolderId(null);
   }
 
   async function handleMoveItem(itemId, folderId) {
@@ -565,12 +820,28 @@ export default function LibraryPage() {
     setMovingItemId(null);
   }
 
+  function handleMediaFileChange(e) {
+    const file = e.target.files[0];
+    if (!file) return;
+    const isVideo = file.type.startsWith('video/');
+    setFormMediaFile(file);
+    setFormMediaType(isVideo ? 'video' : 'image');
+  }
+
+  function clearMedia() {
+    setFormMediaFile(null);
+    setFormMediaType(null);
+    if (mediaInputRef.current) mediaInputRef.current.value = '';
+  }
+
   async function handleAdd() {
     if (!formTitle.trim() || !formScript.trim() || !user) return;
     setSaving(true);
+    setUploadProgress(0);
     try {
       const folderId = (selectedFolderId && selectedFolderId !== 'uncat') ? selectedFolderId : null;
-      await addDoc(collection(db, 'referenceLibrary'), {
+
+      const docRef = await addDoc(collection(db, 'referenceLibrary'), {
         userId: user.uid,
         createdAt: serverTimestamp(),
         title: formTitle.trim(),
@@ -583,15 +854,59 @@ export default function LibraryPage() {
         empathyPoint: null,
         analysis: null,
         folderId,
+        mediaType: null,
+        mediaUrl: null,
+        thumbnailUrl: null,
+        videoUrl: null,
       });
+
+      if (formMediaFile) {
+        const ext = formMediaFile.name.split('.').pop().toLowerCase();
+        const basePath = `referenceMedia/${user.uid}/${docRef.id}`;
+
+        setUploadProgress(15);
+        const mediaRef = ref(storage, `${basePath}/media.${ext}`);
+        await uploadBytes(mediaRef, formMediaFile);
+        const mediaUrl = await getDownloadURL(mediaRef);
+        setUploadProgress(60);
+
+        let thumbnailUrl = null;
+        let thumbnailStoragePath = null;
+
+        if (formMediaType === 'video') {
+          const thumbnailBlob = await generateVideoThumbnail(formMediaFile);
+          if (thumbnailBlob) {
+            thumbnailStoragePath = `${basePath}/thumbnail.jpg`;
+            const thumbRef = ref(storage, thumbnailStoragePath);
+            await uploadBytes(thumbRef, thumbnailBlob);
+            thumbnailUrl = await getDownloadURL(thumbRef);
+          }
+        } else {
+          thumbnailUrl = mediaUrl;
+          thumbnailStoragePath = `${basePath}/media.${ext}`;
+        }
+
+        setUploadProgress(95);
+        await updateDoc(doc(db, 'referenceLibrary', docRef.id), {
+          mediaType: formMediaType,
+          mediaUrl,
+          mediaStoragePath: `${basePath}/media.${ext}`,
+          thumbnailUrl,
+          thumbnailStoragePath,
+          videoUrl: formMediaType === 'video' ? mediaUrl : null,
+        });
+      }
+
       setFormTitle('');
       setFormLink('');
       setFormScript('');
+      clearMedia();
       setShowForm(false);
     } catch (e) {
       console.error('add failed:', e);
     } finally {
       setSaving(false);
+      setUploadProgress(0);
     }
   }
 
@@ -599,8 +914,35 @@ export default function LibraryPage() {
     e.stopPropagation();
     if (!confirm('이 레퍼런스를 삭제할까요?')) return;
     setDeleting(id);
-    try { await deleteDoc(doc(db, 'referenceLibrary', id)); }
-    finally { setDeleting(null); }
+    try {
+      const item = items.find(i => i.id === id);
+      if (item?.mediaStoragePath) {
+        try { await deleteObject(ref(storage, item.mediaStoragePath)); } catch {}
+      }
+      if (item?.thumbnailStoragePath && item.mediaType !== 'image') {
+        try { await deleteObject(ref(storage, item.thumbnailStoragePath)); } catch {}
+      }
+      if (item?.videoStoragePath) {
+        try { await deleteObject(ref(storage, item.videoStoragePath)); } catch {}
+      }
+      await deleteDoc(doc(db, 'referenceLibrary', id));
+    } finally {
+      setDeleting(null);
+    }
+  }
+
+  function closeForm() {
+    setShowForm(false);
+    setFormTitle('');
+    setFormLink('');
+    setFormScript('');
+    clearMedia();
+  }
+
+  function getItemMediaType(item) {
+    if (item.mediaType) return item.mediaType;
+    if (item.videoUrl) return 'video';
+    return null;
   }
 
   return (
@@ -635,6 +977,8 @@ export default function LibraryPage() {
 
         {/* 카드 그리드 */}
         <div className="flex-1 overflow-y-auto p-5">
+          <Breadcrumb folders={folders} selectedFolderId={selectedFolderId} onSelect={setSelectedFolderId} />
+
           {itemsLoading ? (
             <div className="flex items-center justify-center h-48 gap-2">
               <div className="w-5 h-5 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
@@ -656,77 +1000,125 @@ export default function LibraryPage() {
             </div>
           ) : (
             <div className="grid grid-cols-3 lg:grid-cols-4 gap-3">
-              {filteredItems.map(item => (
-                <div
-                  key={item.id}
-                  onClick={() => setDetailItem(item)}
-                  className="bg-white border border-gray-200 rounded-xl p-3 flex flex-col gap-2 cursor-pointer hover:shadow-md hover:border-indigo-200 transition-all group"
-                >
-                  {/* 제목 */}
-                  <p className="text-xs font-bold text-gray-800 truncate">
-                    {item.title || getTitle(item.script)}
-                  </p>
-
-                  {/* 80자 미리보기 */}
-                  <p className="text-[11px] text-gray-500 leading-relaxed">
-                    {(item.script || '').slice(0, 80)}{(item.script?.length ?? 0) > 80 ? '…' : ''}
-                  </p>
-
-                  {/* 뱃지 + 액션 */}
-                  <div className="flex items-center justify-between gap-1 mt-auto">
-                    <div className="flex flex-col gap-1 min-w-0 flex-1">
-                      <div className="flex items-center gap-1 flex-wrap">
-                        <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full flex-shrink-0 ${item.analyzed ? 'bg-emerald-100 text-emerald-700' : 'bg-gray-100 text-gray-400'}`}>
-                          {item.analyzed ? '분석완료' : '미분석'}
-                        </span>
-                        {item.analyzed && item.hookType && (
-                          <span className="text-[10px] bg-indigo-100 text-indigo-600 font-semibold px-1.5 py-0.5 rounded-full truncate max-w-full">
-                            {item.hookType}
-                          </span>
+              {filteredItems.map(item => {
+                const mtype = getItemMediaType(item);
+                const isVideo = mtype === 'video';
+                const isImage = mtype === 'image';
+                return (
+                  <div
+                    key={item.id}
+                    onClick={() => setDetailItem(item)}
+                    className="bg-white border border-gray-200 rounded-xl flex flex-col cursor-pointer hover:shadow-md hover:border-indigo-200 transition-all group overflow-hidden"
+                  >
+                    {/* 썸네일 */}
+                    {item.thumbnailUrl ? (
+                      <div
+                        className="relative w-full bg-black overflow-hidden flex-shrink-0"
+                        style={{ aspectRatio: '16/9' }}
+                        onClick={e => { e.stopPropagation(); setMediaModalItem(item); }}
+                      >
+                        <img src={item.thumbnailUrl} alt="" className="w-full h-full object-cover" />
+                        {isVideo && (
+                          <div className="absolute inset-0 flex items-center justify-center bg-black/20 hover:bg-black/35 transition-colors">
+                            <div className="w-9 h-9 bg-white/90 rounded-full flex items-center justify-center shadow-lg">
+                              <svg className="w-4 h-4 text-gray-800 ml-0.5" fill="currentColor" viewBox="0 0 24 24">
+                                <path d="M8 5v14l11-7z" />
+                              </svg>
+                            </div>
+                          </div>
                         )}
-                      </div>
-                      {item.analyzed && item.analyzedAt && (
-                        <span className="text-[10px] text-gray-400">{formatAnalyzedAt(item.analyzedAt)}</span>
-                      )}
-                    </div>
-                    <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
-                      {/* 폴더 이동 */}
-                      <div className="relative">
-                        <button
-                          onClick={e => { e.stopPropagation(); setMovingItemId(movingItemId === item.id ? null : item.id); }}
-                          className="w-6 h-6 flex items-center justify-center text-gray-400 hover:text-indigo-500 rounded-md hover:bg-indigo-50 transition-colors"
-                        >
-                          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V7z" />
-                          </svg>
-                        </button>
-                        {movingItemId === item.id && (
-                          <div
-                            className="absolute right-0 top-7 z-20 bg-white border border-gray-200 rounded-xl shadow-lg py-1 min-w-[130px]"
-                            onClick={e => e.stopPropagation()}
-                          >
-                            <button onClick={() => handleMoveItem(item.id, null)} className="w-full text-left px-3 py-1.5 text-xs hover:bg-gray-50 text-gray-600">미분류</button>
-                            {folders.map(f => (
-                              <button key={f.id} onClick={() => handleMoveItem(item.id, f.id)} className={`w-full text-left px-3 py-1.5 text-xs hover:bg-gray-50 ${item.folderId === f.id ? 'text-indigo-600 font-semibold' : 'text-gray-600'}`}>{f.name}</button>
-                            ))}
+                        {isImage && (
+                          <div className="absolute inset-0 flex items-center justify-center bg-black/0 hover:bg-black/20 transition-colors">
+                            <div className="opacity-0 hover:opacity-100 w-9 h-9 bg-white/90 rounded-full flex items-center justify-center shadow-lg transition-opacity">
+                              <svg className="w-4 h-4 text-gray-800" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                              </svg>
+                            </div>
                           </div>
                         )}
                       </div>
-                      {/* 삭제 */}
-                      <button
-                        onClick={e => handleDelete(e, item.id)}
-                        disabled={deleting === item.id}
-                        className="w-6 h-6 flex items-center justify-center text-gray-400 hover:text-red-400 rounded-md hover:bg-red-50 transition-colors"
+                    ) : (item.videoUrl && !item.mediaType) ? (
+                      <div
+                        className="relative w-full bg-gray-900 overflow-hidden flex-shrink-0 flex items-center justify-center"
+                        style={{ aspectRatio: '16/9' }}
+                        onClick={e => { e.stopPropagation(); setMediaModalItem(item); }}
                       >
-                        {deleting === item.id
-                          ? <div className="w-3 h-3 border-2 border-gray-400 border-t-transparent rounded-full animate-spin" />
-                          : <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
-                        }
-                      </button>
+                        <div className="w-9 h-9 bg-white/20 rounded-full flex items-center justify-center">
+                          <svg className="w-4 h-4 text-white ml-0.5" fill="currentColor" viewBox="0 0 24 24">
+                            <path d="M8 5v14l11-7z" />
+                          </svg>
+                        </div>
+                      </div>
+                    ) : null}
+
+                    <div className="p-3 flex flex-col gap-2 flex-1">
+                      <p className="text-xs font-bold text-gray-800 truncate">
+                        {item.title || getTitle(item.script)}
+                      </p>
+                      <p className="text-[11px] text-gray-500 leading-relaxed">
+                        {(item.script || '').slice(0, 80)}{(item.script?.length ?? 0) > 80 ? '…' : ''}
+                      </p>
+                      <div className="flex items-center justify-between gap-1 mt-auto">
+                        <div className="flex flex-col gap-1 min-w-0 flex-1">
+                          <div className="flex items-center gap-1 flex-wrap">
+                            <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full flex-shrink-0 ${item.analyzed ? 'bg-emerald-100 text-emerald-700' : 'bg-gray-100 text-gray-400'}`}>
+                              {item.analyzed ? '분석완료' : '미분석'}
+                            </span>
+                            {item.analyzed && item.hookType && (
+                              <span className="text-[10px] bg-indigo-100 text-indigo-600 font-semibold px-1.5 py-0.5 rounded-full truncate max-w-full">
+                                {item.hookType}
+                              </span>
+                            )}
+                          </div>
+                          {item.analyzed && item.analyzedAt && (
+                            <span className="text-[10px] text-gray-400">{formatAnalyzedAt(item.analyzedAt)}</span>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
+                          {/* 폴더 이동 */}
+                          <div className="relative">
+                            <button
+                              onClick={e => { e.stopPropagation(); setMovingItemId(movingItemId === item.id ? null : item.id); }}
+                              className="w-6 h-6 flex items-center justify-center text-gray-400 hover:text-indigo-500 rounded-md hover:bg-indigo-50 transition-colors"
+                            >
+                              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V7z" />
+                              </svg>
+                            </button>
+                            {movingItemId === item.id && (
+                              <div
+                                className="absolute right-0 top-7 z-20 bg-white border border-gray-200 rounded-xl shadow-lg py-1 min-w-[140px] max-h-48 overflow-y-auto"
+                                onClick={e => e.stopPropagation()}
+                              >
+                                <button onClick={() => handleMoveItem(item.id, null)} className="w-full text-left px-3 py-1.5 text-xs hover:bg-gray-50 text-gray-600">미분류</button>
+                                {folders.map(f => (
+                                  <button key={f.id} onClick={() => handleMoveItem(item.id, f.id)}
+                                    className={`w-full text-left px-3 py-1.5 text-xs hover:bg-gray-50 ${item.folderId === f.id ? 'text-indigo-600 font-semibold' : 'text-gray-600'}`}
+                                    style={{ paddingLeft: f.parentId ? 20 : 12 }}
+                                  >
+                                    {f.parentId ? '└ ' : ''}{f.name}
+                                  </button>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                          {/* 삭제 */}
+                          <button
+                            onClick={e => handleDelete(e, item.id)}
+                            disabled={deleting === item.id}
+                            className="w-6 h-6 flex items-center justify-center text-gray-400 hover:text-red-400 rounded-md hover:bg-red-50 transition-colors"
+                          >
+                            {deleting === item.id
+                              ? <div className="w-3 h-3 border-2 border-gray-400 border-t-transparent rounded-full animate-spin" />
+                              : <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                            }
+                          </button>
+                        </div>
+                      </div>
                     </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>
@@ -738,22 +1130,30 @@ export default function LibraryPage() {
           item={detailItem}
           onClose={() => setDetailItem(null)}
           onGoAnalyze={handleGoAnalyze}
+          onPlayMedia={() => { setDetailItem(null); setMediaModalItem(detailItem); }}
         />
+      )}
+
+      {/* 미디어 모달 */}
+      {mediaModalItem && (
+        getItemMediaType(mediaModalItem) === 'image'
+          ? <ImageModal item={mediaModalItem} onClose={() => setMediaModalItem(null)} />
+          : <VideoModal item={mediaModalItem} onClose={() => setMediaModalItem(null)} />
       )}
 
       {/* 새 레퍼런스 추가 모달 */}
       {showForm && (
-        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => setShowForm(false)}>
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg" onClick={e => e.stopPropagation()}>
-            <div className="px-6 pt-6 pb-4 border-b border-gray-100 flex items-center justify-between">
+        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={closeForm}>
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg max-h-[90vh] flex flex-col" onClick={e => e.stopPropagation()}>
+            <div className="px-6 pt-6 pb-4 border-b border-gray-100 flex items-center justify-between flex-shrink-0">
               <h3 className="text-sm font-bold text-gray-900">새 레퍼런스 추가</h3>
-              <button onClick={() => setShowForm(false)} className="text-gray-400 hover:text-gray-600 transition-colors">
+              <button onClick={closeForm} className="text-gray-400 hover:text-gray-600 transition-colors">
                 <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                 </svg>
               </button>
             </div>
-            <div className="px-6 py-5 flex flex-col gap-4">
+            <div className="px-6 py-5 flex flex-col gap-4 overflow-y-auto">
               <div>
                 <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1.5">
                   제목/주제명 <span className="text-red-400">*</span>
@@ -781,6 +1181,48 @@ export default function LibraryPage() {
               </div>
               <div>
                 <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1.5">
+                  이미지 / 영상 <span className="font-normal text-gray-400 normal-case">(선택사항 · jpg, png, gif, mp4, mov)</span>
+                </label>
+                <input
+                  ref={mediaInputRef}
+                  type="file"
+                  accept="image/jpeg,image/png,image/gif,.jpg,.jpeg,.png,.gif,video/mp4,video/quicktime,.mp4,.mov"
+                  className="hidden"
+                  onChange={handleMediaFileChange}
+                />
+                {formMediaFile ? (
+                  <div className="flex items-center gap-2 px-4 py-2.5 bg-indigo-50 border border-indigo-200 rounded-xl">
+                    {formMediaType === 'image' ? (
+                      <svg className="w-4 h-4 text-indigo-500 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                      </svg>
+                    ) : (
+                      <svg className="w-4 h-4 text-indigo-500 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 10l4.553-2.069A1 1 0 0121 8.868v6.264a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                      </svg>
+                    )}
+                    <span className="text-xs text-indigo-700 font-medium flex-1 truncate">{formMediaFile.name}</span>
+                    <button type="button" onClick={clearMedia} className="text-indigo-400 hover:text-indigo-600 flex-shrink-0 transition-colors">
+                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                      </svg>
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => mediaInputRef.current?.click()}
+                    className="w-full flex items-center justify-center gap-2 border-2 border-dashed border-gray-200 hover:border-indigo-300 hover:bg-indigo-50 rounded-xl py-5 transition-colors text-gray-400 hover:text-indigo-500"
+                  >
+                    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                    </svg>
+                    <span className="text-sm font-medium">이미지 또는 영상 업로드</span>
+                  </button>
+                )}
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1.5">
                   대본 텍스트 <span className="text-red-400">*</span>
                 </label>
                 <textarea
@@ -797,18 +1239,31 @@ export default function LibraryPage() {
                 </p>
               )}
             </div>
-            <div className="px-6 pb-6 flex gap-2">
-              <button
-                onClick={handleAdd}
-                disabled={!formTitle.trim() || !formScript.trim() || saving}
-                className="flex-1 flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-300 text-white font-semibold py-2.5 rounded-xl transition-colors text-sm"
-              >
-                {saving && <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />}
-                저장
-              </button>
-              <button onClick={() => setShowForm(false)} className="px-4 py-2.5 text-sm text-gray-500 hover:text-gray-700 transition-colors">
-                취소
-              </button>
+            <div className="px-6 pb-6 flex flex-col gap-3 flex-shrink-0">
+              {saving && formMediaFile && uploadProgress > 0 && (
+                <div>
+                  <div className="flex items-center justify-between text-xs text-gray-500 mb-1">
+                    <span>{formMediaType === 'image' ? '이미지 업로드 중...' : '영상 업로드 중...'}</span>
+                    <span>{uploadProgress}%</span>
+                  </div>
+                  <div className="w-full bg-gray-200 rounded-full h-1.5 overflow-hidden">
+                    <div className="bg-indigo-500 h-full rounded-full transition-all duration-300" style={{ width: `${uploadProgress}%` }} />
+                  </div>
+                </div>
+              )}
+              <div className="flex gap-2">
+                <button
+                  onClick={handleAdd}
+                  disabled={!formTitle.trim() || !formScript.trim() || saving}
+                  className="flex-1 flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-300 text-white font-semibold py-2.5 rounded-xl transition-colors text-sm"
+                >
+                  {saving && <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />}
+                  {saving ? (formMediaFile ? '업로드 중...' : '저장 중...') : '저장'}
+                </button>
+                <button onClick={closeForm} className="px-4 py-2.5 text-sm text-gray-500 hover:text-gray-700 transition-colors">
+                  취소
+                </button>
+              </div>
             </div>
           </div>
         </div>
