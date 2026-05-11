@@ -1194,6 +1194,11 @@ exports.extractScript = onCall(
         throw new HttpsError('invalid-argument', '영상이 너무 깁니다. 60초 이하의 영상을 사용해주세요.');
       }
 
+      console.log('=== STT DEBUG ===');
+      console.log('CLIENT_ID value:', naverClientId.value());
+      console.log('CLIENT_SECRET value:', naverClientSecret.value());
+      console.log('CLIENT_ID length:', naverClientId.value()?.length);
+      console.log('CLIENT_SECRET length:', naverClientSecret.value()?.length);
       const text = await callNaverStt(audioBuffer, clientId, clientSecret);
       console.log('STT result length:', text?.length);
 
