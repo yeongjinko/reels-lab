@@ -503,45 +503,6 @@ function DetailModal({ item, onClose, onGoAnalyze, onPlayMedia }) {
             )}
           </div>
 
-          {/* 저장 메모 */}
-          <div>
-            {editingField === 'memo' ? (
-              <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 flex flex-col gap-2">
-                <div className="flex items-center gap-1.5">
-                  <span className="text-sm">📌</span>
-                  <span className="text-xs font-semibold text-amber-700">저장 메모</span>
-                </div>
-                <textarea value={editValue} onChange={e => setEditValue(e.target.value)} rows={2} autoFocus
-                  placeholder="예) 이 후킹 구조 써먹고 싶어서 / CTA 방식 참고용"
-                  className="w-full border border-amber-300 rounded-lg px-3 py-2 text-sm text-amber-900 leading-relaxed outline-none focus:ring-2 focus:ring-amber-400 resize-none bg-white placeholder-amber-300" />
-                <div className="flex gap-2">
-                  <button onClick={saveEdit} disabled={saving}
-                    className="flex items-center gap-1.5 text-xs bg-amber-500 hover:bg-amber-600 disabled:bg-amber-300 text-white px-3 py-1.5 rounded-lg font-semibold transition-colors">
-                    {saving && <div className="w-3 h-3 border border-white border-t-transparent rounded-full animate-spin" />}
-                    저장
-                  </button>
-                  <button onClick={cancelEdit} className="text-xs text-gray-500 hover:text-gray-700 px-3 py-1.5 rounded-lg border border-gray-200 hover:bg-gray-50 transition-colors">취소</button>
-                </div>
-              </div>
-            ) : localItem.memo ? (
-              <button onClick={() => startEdit('memo')} className="w-full text-left group/memo bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 hover:border-amber-300 hover:bg-amber-100 transition-colors">
-                <div className="flex items-start gap-2">
-                  <span className="text-sm flex-shrink-0">📌</span>
-                  <div className="flex-1 min-w-0">
-                    <span className="text-xs font-semibold text-amber-700">저장 메모</span>
-                    <p className="text-sm text-amber-900 mt-0.5 leading-relaxed">{localItem.memo}</p>
-                  </div>
-                  <span className="opacity-0 group-hover/memo:opacity-100 transition-opacity flex-shrink-0 mt-0.5"><PencilIcon /></span>
-                </div>
-              </button>
-            ) : (
-              <button onClick={() => startEdit('memo')} className="w-full flex items-center gap-2 px-3 py-2 text-xs text-gray-400 hover:text-amber-600 hover:bg-amber-50 border border-dashed border-gray-200 hover:border-amber-300 rounded-xl transition-colors">
-                <span>📌</span>
-                <span>저장 메모 추가...</span>
-              </button>
-            )}
-          </div>
-
           {/* 대본 수정 알림 */}
           {scriptResetBanner && (
             <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 flex items-center justify-between gap-3">
@@ -585,6 +546,45 @@ function DetailModal({ item, onClose, onGoAnalyze, onPlayMedia }) {
                 {scriptSaved ? '저장됨 ✓' : scriptSaving ? '저장 중...' : '대본 저장'}
               </button>
             </div>
+          </div>
+
+          {/* 저장 메모 */}
+          <div>
+            {editingField === 'memo' ? (
+              <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 flex flex-col gap-2">
+                <div className="flex items-center gap-1.5">
+                  <span className="text-sm">📌</span>
+                  <span className="text-xs font-semibold text-amber-700">저장 메모</span>
+                </div>
+                <textarea value={editValue} onChange={e => setEditValue(e.target.value)} rows={2} autoFocus
+                  placeholder="예) 이 후킹 구조 써먹고 싶어서 / CTA 방식 참고용"
+                  className="w-full border border-amber-300 rounded-lg px-3 py-2 text-sm text-amber-900 leading-relaxed outline-none focus:ring-2 focus:ring-amber-400 resize-none bg-white placeholder-amber-300" />
+                <div className="flex gap-2">
+                  <button onClick={saveEdit} disabled={saving}
+                    className="flex items-center gap-1.5 text-xs bg-amber-500 hover:bg-amber-600 disabled:bg-amber-300 text-white px-3 py-1.5 rounded-lg font-semibold transition-colors">
+                    {saving && <div className="w-3 h-3 border border-white border-t-transparent rounded-full animate-spin" />}
+                    저장
+                  </button>
+                  <button onClick={cancelEdit} className="text-xs text-gray-500 hover:text-gray-700 px-3 py-1.5 rounded-lg border border-gray-200 hover:bg-gray-50 transition-colors">취소</button>
+                </div>
+              </div>
+            ) : localItem.memo ? (
+              <button onClick={() => startEdit('memo')} className="w-full text-left group/memo bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 hover:border-amber-300 hover:bg-amber-100 transition-colors">
+                <div className="flex items-start gap-2">
+                  <span className="text-sm flex-shrink-0">📌</span>
+                  <div className="flex-1 min-w-0">
+                    <span className="text-xs font-semibold text-amber-700">저장 메모</span>
+                    <p className="text-sm text-amber-900 mt-0.5 leading-relaxed">{localItem.memo}</p>
+                  </div>
+                  <span className="opacity-0 group-hover/memo:opacity-100 transition-opacity flex-shrink-0 mt-0.5"><PencilIcon /></span>
+                </div>
+              </button>
+            ) : (
+              <button onClick={() => startEdit('memo')} className="w-full flex items-center gap-2 px-3 py-2 text-xs text-gray-400 hover:text-amber-600 hover:bg-amber-50 border border-dashed border-gray-200 hover:border-amber-300 rounded-xl transition-colors">
+                <span>📌</span>
+                <span>저장 메모 추가...</span>
+              </button>
+            )}
           </div>
 
           {/* 분석 결과 */}
