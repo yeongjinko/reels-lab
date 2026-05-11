@@ -1110,48 +1110,13 @@ ${fullTemplate}
   }
 );
 
-/* ── Naver Clova STT ── */
-const naverClientId = defineSecret('NAVER_CLIENT_ID');
-const naverClientSecret = defineSecret('NAVER_CLIENT_SECRET');
-
-function callNaverStt(buffer, clientId, clientSecret) {
-  return new Promise((resolve, reject) => {
-    const options = {
-      hostname: 'naveropenapi.apigw.ntruss.com',
-      path: '/recog/v1/stt?lang=Kor',
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/octet-stream',
-        'X-NCP-APIGW-API-KEY-ID': clientId,
-        'X-NCP-APIGW-API-KEY': clientSecret,
-        'Content-Length': buffer.length,
-      },
-    };
-    const req = https.request(options, (res) => {
-      let data = '';
-      res.on('data', chunk => { data += chunk; });
-      res.on('end', () => {
-        console.log('Naver STT status:', res.statusCode, 'body:', data.slice(0, 300));
-        if (res.statusCode !== 200) {
-          return reject(new Error(`Naver STT error ${res.statusCode}: ${data}`));
-        }
-        try {
-          const json = JSON.parse(data);
-          resolve(json.text || '');
-        } catch {
-          reject(new Error('STT 응답 파싱 실패: ' + data));
-        }
-      });
-    });
-    req.on('error', reject);
-    req.write(buffer);
-    req.end();
-  });
-}
+/* ── OpenAI Whisper STT ── */
+const OpenAI = require('openai');
+const openaiApiKey = defineSecret('OPENAI_API_KEY');
 
 exports.extractScript = onCall(
   {
-    secrets: [naverClientId, naverClientSecret],
+    secrets: [openaiApiKey],
     cors: true,
     timeoutSeconds: 300,
     memory: '1GiB',
@@ -1160,13 +1125,6 @@ exports.extractScript = onCall(
     if (!request.auth) throw new HttpsError('unauthenticated', '로그인이 필요합니다.');
     const { storagePath } = request.data;
     if (!storagePath) throw new HttpsError('invalid-argument', '영상 경로가 필요합니다.');
-
-    // ── 키 확인 (함수 진입 즉시) ──
-    const clientId = naverClientId.value()?.trim();
-    const clientSecret = naverClientSecret.value()?.trim();
-    console.log('CLIENT_ID:', clientId?.substring(0, 5), '/ LENGTH:', clientId?.length);
-    console.log('CLIENT_SECRET:', clientSecret?.substring(0, 5), '/ LENGTH:', clientSecret?.length);
-    if (!clientId || !clientSecret) throw new HttpsError('internal', 'Naver API 키가 설정되지 않았습니다.');
 
     const ts = Date.now();
     const videoPath = path.join(os.tmpdir(), `video_${ts}`);
@@ -1189,20 +1147,21 @@ exports.extractScript = onCall(
       });
       console.log('audio extracted:', audioPath);
 
-      const audioBuffer = fs.readFileSync(audioPath);
-      if (audioBuffer.length > 200 * 1024 * 1024) {
-        throw new HttpsError('invalid-argument', '영상이 너무 깁니다. 60초 이하의 영상을 사용해주세요.');
+      const audioStat = fs.statSync(audioPath);
+      if (audioStat.size > 25 * 1024 * 1024) {
+        throw new HttpsError('invalid-argument', '오디오 파일이 너무 큽니다. 25MB 이하의 영상을 사용해주세요.');
       }
+      console.log('audio size:', audioStat.size, 'bytes');
 
-      console.log('=== STT DEBUG ===');
-      console.log('CLIENT_ID value:', naverClientId.value());
-      console.log('CLIENT_SECRET value:', naverClientSecret.value());
-      console.log('CLIENT_ID length:', naverClientId.value()?.length);
-      console.log('CLIENT_SECRET length:', naverClientSecret.value()?.length);
-      const text = await callNaverStt(audioBuffer, clientId, clientSecret);
-      console.log('STT result length:', text?.length);
+      const openai = new OpenAI({ apiKey: openaiApiKey.value() });
+      const transcription = await openai.audio.transcriptions.create({
+        file: fs.createReadStream(audioPath),
+        model: 'whisper-1',
+        language: 'ko',
+      });
+      console.log('Whisper result length:', transcription.text?.length);
 
-      return { success: true, text: text || '' };
+      return { text: transcription.text };
     } catch (e) {
       console.error('extractScript error:', e?.message || e);
       if (e instanceof HttpsError) throw e;
