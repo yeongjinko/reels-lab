@@ -1131,6 +1131,7 @@ function callNaverStt(buffer, clientId, clientSecret) {
       let data = '';
       res.on('data', chunk => { data += chunk; });
       res.on('end', () => {
+        console.log('Naver STT status:', res.statusCode, 'body:', data.slice(0, 300));
         if (res.statusCode !== 200) {
           return reject(new Error(`Naver STT error ${res.statusCode}: ${data}`));
         }
@@ -1186,7 +1187,12 @@ exports.extractScript = onCall(
         throw new HttpsError('invalid-argument', '영상이 너무 깁니다. 60초 이하의 영상을 사용해주세요.');
       }
 
-      const text = await callNaverStt(audioBuffer, naverClientId.value(), naverClientSecret.value());
+      const clientId = naverClientId.value()?.trim();
+      const clientSecret = naverClientSecret.value()?.trim();
+      console.log('CLIENT_ID LENGTH:', clientId?.length);
+      console.log('CLIENT_SECRET LENGTH:', clientSecret?.length);
+      if (!clientId || !clientSecret) throw new HttpsError('internal', 'Naver API 키가 설정되지 않았습니다.');
+      const text = await callNaverStt(audioBuffer, clientId, clientSecret);
       console.log('STT result length:', text?.length);
 
       return { success: true, text: text || '' };
