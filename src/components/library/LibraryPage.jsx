@@ -164,6 +164,10 @@ function DetailModal({ item, onClose, onGoAnalyze, onPlayMedia }) {
 
   // STT 추출 상태
   const [extractingScript, setExtractingScript] = useState(false);
+  // 대본 인라인 편집 상태
+  const [localScript, setLocalScript] = useState(item.script || '');
+  const [scriptSaving, setScriptSaving] = useState(false);
+  const [scriptSaved, setScriptSaved] = useState(false);
 
   // 미디어 편집 상태
   const [pendingFile, setPendingFile] = useState(null);
@@ -321,14 +325,13 @@ function DetailModal({ item, onClose, onGoAnalyze, onPlayMedia }) {
   async function handleExtractDetailScript() {
     const storagePath = localItem.mediaStoragePath || localItem.videoStoragePath;
     if (!storagePath) return;
-    if (localItem.script?.trim() && !confirm('기존 대본을 덮어쓸까요?')) return;
+    if (localScript.trim() && !confirm('기존 대본을 덮어쓸까요?')) return;
     setExtractingScript(true);
     try {
       const fn = httpsCallable(functions, 'extractScript');
       const result = await fn({ storagePath });
       if (result.data.text) {
-        setEditingField('script');
-        setEditValue(result.data.text);
+        setLocalScript(result.data.text);
       }
     } catch (e) {
       console.error('STT 오류:', e);
@@ -336,6 +339,27 @@ function DetailModal({ item, onClose, onGoAnalyze, onPlayMedia }) {
     } finally {
       setExtractingScript(false);
     }
+  }
+
+  async function saveScript() {
+    setScriptSaving(true);
+    try {
+      const updates = {
+        script: localScript.trim(),
+        preview: localScript.trim().slice(0, 50),
+        analyzed: false,
+        hookType: null,
+        empathyTags: [],
+        empathyPoint: null,
+        analysis: null,
+      };
+      await updateDoc(doc(db, 'referenceLibrary', localItem.id), updates);
+      setLocalItem(prev => ({ ...prev, ...updates }));
+      if (localItem.analyzed) setScriptResetBanner(true);
+      setScriptSaved(true);
+      setTimeout(() => setScriptSaved(false), 2000);
+    } catch (e) { console.error(e); }
+    finally { setScriptSaving(false); }
   }
 
   return (
@@ -405,24 +429,30 @@ function DetailModal({ item, onClose, onGoAnalyze, onPlayMedia }) {
           {/* 미디어 프리뷰 + 편집 */}
           <div>
             {hasMedia && (
-              <div className="relative bg-black rounded-xl overflow-hidden cursor-pointer group mb-2" style={{ aspectRatio: '3/4' }} onClick={onPlayMedia}>
-                {localItem.thumbnailUrl ? (
-                  <img src={localItem.thumbnailUrl} alt="" className="w-full h-full object-cover" />
-                ) : (
-                  <div className="w-full h-full bg-gray-900" />
-                )}
-                <div className="absolute inset-0 flex items-center justify-center bg-black/30 group-hover:bg-black/45 transition-colors">
-                  {isVideo ? (
-                    <div className="w-14 h-14 bg-white/90 rounded-full flex items-center justify-center shadow-xl">
-                      <svg className="w-6 h-6 text-gray-800 ml-1" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z" /></svg>
-                    </div>
+              isVideo ? (
+                <div className="bg-black rounded-xl overflow-hidden mb-2">
+                  <video
+                    src={localItem.mediaUrl || localItem.videoUrl}
+                    controls
+                    poster={localItem.thumbnailUrl}
+                    className="w-full"
+                    style={{ maxHeight: '300px' }}
+                  />
+                </div>
+              ) : (
+                <div className="relative bg-black rounded-xl overflow-hidden cursor-pointer group mb-2" style={{ aspectRatio: '3/4' }} onClick={onPlayMedia}>
+                  {localItem.thumbnailUrl ? (
+                    <img src={localItem.thumbnailUrl} alt="" className="w-full h-full object-cover" />
                   ) : (
+                    <div className="w-full h-full bg-gray-900" />
+                  )}
+                  <div className="absolute inset-0 flex items-center justify-center bg-black/30 group-hover:bg-black/45 transition-colors">
                     <div className="w-14 h-14 bg-white/90 rounded-full flex items-center justify-center shadow-xl">
                       <svg className="w-6 h-6 text-gray-800" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
                     </div>
-                  )}
+                  </div>
                 </div>
-              </div>
+              )
             )}
 
             {/* 미디어 편집 버튼 */}
@@ -524,45 +554,37 @@ function DetailModal({ item, onClose, onGoAnalyze, onPlayMedia }) {
           <div>
             <div className="flex items-center justify-between mb-2">
               <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider">대본 전문</p>
-              <div className="flex items-center gap-2">
-                {isVideo && (localItem.mediaStoragePath || localItem.videoStoragePath) && editingField !== 'script' && (
-                  <button
-                    onClick={handleExtractDetailScript}
-                    disabled={extractingScript}
-                    className="flex items-center gap-1 text-xs text-indigo-500 hover:text-indigo-700 disabled:text-indigo-300 transition-colors font-medium"
-                  >
-                    {extractingScript ? (
-                      <><div className="w-3 h-3 border border-indigo-400 border-t-transparent rounded-full animate-spin" />음성 인식 중...</>
-                    ) : (
-                      <><svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" /></svg>대본 자동 추출</>
-                    )}
-                  </button>
-                )}
-                {editingField !== 'script' && (
-                  <button onClick={() => startEdit('script')} className="flex items-center gap-1 text-xs text-gray-400 hover:text-indigo-500 transition-colors">
-                    <PencilIcon /> 수정
-                  </button>
-                )}
-              </div>
+              {isVideo && (localItem.mediaStoragePath || localItem.videoStoragePath) && (
+                <button
+                  onClick={handleExtractDetailScript}
+                  disabled={extractingScript}
+                  className="flex items-center gap-1 text-xs text-indigo-500 hover:text-indigo-700 disabled:text-indigo-300 transition-colors font-medium"
+                >
+                  {extractingScript ? (
+                    <><div className="w-3 h-3 border border-indigo-400 border-t-transparent rounded-full animate-spin" />음성 인식 중...</>
+                  ) : (
+                    <><svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" /></svg>대본 자동 추출</>
+                  )}
+                </button>
+              )}
             </div>
-            {editingField === 'script' ? (
-              <div className="flex flex-col gap-2">
-                <textarea value={editValue} onChange={e => setEditValue(e.target.value)} rows={8} autoFocus
-                  className="w-full border border-indigo-400 rounded-xl px-4 py-3 text-sm text-gray-700 leading-relaxed outline-none focus:ring-2 focus:ring-indigo-500 resize-none bg-gray-50" />
-                <div className="flex gap-2">
-                  <button onClick={saveEdit} disabled={saving || !editValue.trim()}
-                    className="flex items-center gap-1.5 text-sm bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-300 text-white px-4 py-2 rounded-xl font-semibold transition-colors">
-                    {saving && <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />}
-                    저장
-                  </button>
-                  <button onClick={cancelEdit} className="text-sm text-gray-500 hover:text-gray-700 px-4 py-2 rounded-xl border border-gray-200 hover:bg-gray-50 transition-colors">취소</button>
-                </div>
-              </div>
-            ) : (
-              <div className="bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm text-gray-700 leading-relaxed whitespace-pre-wrap">
-                {localItem.script || <span className="text-gray-400">대본 없음</span>}
-              </div>
-            )}
+            <textarea
+              value={localScript}
+              onChange={e => setLocalScript(e.target.value)}
+              rows={8}
+              placeholder="대본을 입력하세요..."
+              className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm text-gray-700 leading-relaxed outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-400 resize-none bg-gray-50"
+            />
+            <div className="flex gap-2 mt-2">
+              <button
+                onClick={saveScript}
+                disabled={scriptSaving}
+                className={`flex items-center gap-1.5 text-sm px-4 py-2 rounded-xl font-semibold transition-colors text-white ${scriptSaved ? 'bg-emerald-500' : 'bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-300'}`}
+              >
+                {scriptSaving && <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />}
+                {scriptSaved ? '저장됨 ✓' : scriptSaving ? '저장 중...' : '대본 저장'}
+              </button>
+            </div>
           </div>
 
           {/* 분석 결과 */}
