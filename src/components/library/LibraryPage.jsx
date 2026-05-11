@@ -173,7 +173,10 @@ function DetailModal({ item, onClose, onGoAnalyze, onPlayMedia }) {
   function handleGoAnalyze() { onGoAnalyze(localItem); }
   function startEdit(field) {
     setEditingField(field);
-    setEditValue(field === 'title' ? (localItem.title || '') : field === 'link' ? (localItem.link || '') : localItem.script || '');
+    if (field === 'title') setEditValue(localItem.title || '');
+    else if (field === 'link') setEditValue(localItem.link || '');
+    else if (field === 'memo') setEditValue(localItem.memo || '');
+    else setEditValue(localItem.script || '');
   }
   function cancelEdit() { setEditingField(null); setEditValue(''); }
 
@@ -186,6 +189,8 @@ function DetailModal({ item, onClose, onGoAnalyze, onPlayMedia }) {
         updates.title = editValue.trim();
       } else if (editingField === 'link') {
         updates.link = editValue.trim() || null;
+      } else if (editingField === 'memo') {
+        updates.memo = editValue.trim() || null;
       } else if (editingField === 'script') {
         updates.script = editValue.trim();
         updates.preview = editValue.trim().slice(0, 50);
@@ -441,6 +446,45 @@ function DetailModal({ item, onClose, onGoAnalyze, onPlayMedia }) {
                   </button>
                 )}
               </div>
+            )}
+          </div>
+
+          {/* 저장 메모 */}
+          <div>
+            {editingField === 'memo' ? (
+              <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 flex flex-col gap-2">
+                <div className="flex items-center gap-1.5">
+                  <span className="text-sm">📌</span>
+                  <span className="text-xs font-semibold text-amber-700">저장 메모</span>
+                </div>
+                <textarea value={editValue} onChange={e => setEditValue(e.target.value)} rows={2} autoFocus
+                  placeholder="예) 이 후킹 구조 써먹고 싶어서 / CTA 방식 참고용"
+                  className="w-full border border-amber-300 rounded-lg px-3 py-2 text-sm text-amber-900 leading-relaxed outline-none focus:ring-2 focus:ring-amber-400 resize-none bg-white placeholder-amber-300" />
+                <div className="flex gap-2">
+                  <button onClick={saveEdit} disabled={saving}
+                    className="flex items-center gap-1.5 text-xs bg-amber-500 hover:bg-amber-600 disabled:bg-amber-300 text-white px-3 py-1.5 rounded-lg font-semibold transition-colors">
+                    {saving && <div className="w-3 h-3 border border-white border-t-transparent rounded-full animate-spin" />}
+                    저장
+                  </button>
+                  <button onClick={cancelEdit} className="text-xs text-gray-500 hover:text-gray-700 px-3 py-1.5 rounded-lg border border-gray-200 hover:bg-gray-50 transition-colors">취소</button>
+                </div>
+              </div>
+            ) : localItem.memo ? (
+              <button onClick={() => startEdit('memo')} className="w-full text-left group/memo bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 hover:border-amber-300 hover:bg-amber-100 transition-colors">
+                <div className="flex items-start gap-2">
+                  <span className="text-sm flex-shrink-0">📌</span>
+                  <div className="flex-1 min-w-0">
+                    <span className="text-xs font-semibold text-amber-700">저장 메모</span>
+                    <p className="text-sm text-amber-900 mt-0.5 leading-relaxed">{localItem.memo}</p>
+                  </div>
+                  <span className="opacity-0 group-hover/memo:opacity-100 transition-opacity flex-shrink-0 mt-0.5"><PencilIcon /></span>
+                </div>
+              </button>
+            ) : (
+              <button onClick={() => startEdit('memo')} className="w-full flex items-center gap-2 px-3 py-2 text-xs text-gray-400 hover:text-amber-600 hover:bg-amber-50 border border-dashed border-gray-200 hover:border-amber-300 rounded-xl transition-colors">
+                <span>📌</span>
+                <span>저장 메모 추가...</span>
+              </button>
             )}
           </div>
 
@@ -731,6 +775,7 @@ export default function LibraryPage() {
   const [formTitle, setFormTitle] = useState('');
   const [formLink, setFormLink] = useState('');
   const [formScript, setFormScript] = useState('');
+  const [formMemo, setFormMemo] = useState('');
   const [formMediaFile, setFormMediaFile] = useState(null);
   const [formMediaType, setFormMediaType] = useState(null);
   const [uploadProgress, setUploadProgress] = useState(0);
@@ -795,14 +840,22 @@ export default function LibraryPage() {
   }
 
   async function handleDeleteFolder(id) {
-    if (!confirm('폴더를 삭제할까요? 안의 카드는 미분류로 이동합니다.')) return;
-    const subIds = folders.filter(f => f.parentId === id).map(f => f.id);
-    for (const fid of [id, ...subIds]) {
-      const snap = await getDocs(query(collection(db, 'referenceLibrary'), where('folderId', '==', fid)));
-      await Promise.all(snap.docs.map(d => updateDoc(doc(db, 'referenceLibrary', d.id), { folderId: null })));
-      await deleteDoc(doc(db, 'referenceFolders', fid));
+    if (!confirm('이 폴더를 삭제하면 안의 카드는 미분류로 이동합니다. 계속할까요?')) return;
+    try {
+      const subIds = folders.filter(f => f.parentId === id).map(f => f.id);
+      const allIds = [id, ...subIds];
+      for (const fid of allIds) {
+        const snap = await getDocs(query(collection(db, 'referenceLibrary'), where('userId', '==', user.uid), where('folderId', '==', fid)));
+        await Promise.all(snap.docs.map(d => updateDoc(doc(db, 'referenceLibrary', d.id), { folderId: null })));
+      }
+      for (const fid of [...subIds, id]) {
+        await deleteDoc(doc(db, 'referenceFolders', fid));
+      }
+      if (allIds.includes(selectedFolderId)) setSelectedFolderId(null);
+    } catch (e) {
+      console.error('폴더 삭제 오류:', e);
+      alert('폴더 삭제 중 오류가 발생했습니다.');
     }
-    if ([id, ...folders.filter(f => f.parentId === id).map(f => f.id)].includes(selectedFolderId)) setSelectedFolderId(null);
   }
 
   async function handleMoveItem(itemId, folderId) {
@@ -831,6 +884,7 @@ export default function LibraryPage() {
         userId: user.uid, createdAt: serverTimestamp(),
         title: formTitle.trim(), link: formLink.trim() || null,
         script: formScript.trim(), preview: formScript.trim().slice(0, 50),
+        memo: formMemo.trim() || null,
         analyzed: false, hookType: null, empathyTags: [], empathyPoint: null, analysis: null,
         folderId, mediaType: null, mediaUrl: null, thumbnailUrl: null, videoUrl: null,
       });
@@ -863,7 +917,7 @@ export default function LibraryPage() {
         });
       }
 
-      setFormTitle(''); setFormLink(''); setFormScript(''); clearMedia(); setShowForm(false);
+      setFormTitle(''); setFormLink(''); setFormScript(''); setFormMemo(''); clearMedia(); setShowForm(false);
     } catch (e) { console.error(e); }
     finally { setSaving(false); setUploadProgress(0); }
   }
@@ -882,7 +936,7 @@ export default function LibraryPage() {
   }
 
   function closeForm() {
-    setShowForm(false); setFormTitle(''); setFormLink(''); setFormScript(''); clearMedia();
+    setShowForm(false); setFormTitle(''); setFormLink(''); setFormScript(''); setFormMemo(''); clearMedia();
   }
 
   function getItemMediaType(item) {
@@ -966,9 +1020,12 @@ export default function LibraryPage() {
                         {(item.script || '').slice(0, 60)}{(item.script?.length ?? 0) > 60 ? '…' : ''}
                       </p>
                       <div className="flex items-center justify-between gap-1 mt-auto">
-                        <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${item.analyzed ? 'bg-emerald-100 text-emerald-700' : 'bg-gray-100 text-gray-400'}`}>
-                          {item.analyzed ? '분석완료' : '미분석'}
-                        </span>
+                        <div className="flex items-center gap-1">
+                          <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${item.analyzed ? 'bg-emerald-100 text-emerald-700' : 'bg-gray-100 text-gray-400'}`}>
+                            {item.analyzed ? '분석완료' : '미분석'}
+                          </span>
+                          {item.memo && <span className="text-[11px]" title={item.memo}>📌</span>}
+                        </div>
                         <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
                           {/* 폴더 이동 */}
                           <div className="relative">
@@ -1071,6 +1128,12 @@ export default function LibraryPage() {
                 <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1.5">대본 텍스트 <span className="text-red-400">*</span></label>
                 <textarea value={formScript} onChange={e => setFormScript(e.target.value)}
                   placeholder="대본을 입력하세요" rows={6}
+                  className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent bg-gray-50 placeholder-gray-400 resize-none" />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1.5">저장 메모 <span className="font-normal text-gray-400 normal-case">(선택)</span></label>
+                <textarea value={formMemo} onChange={e => setFormMemo(e.target.value)}
+                  placeholder="예) 이 후킹 구조 써먹고 싶어서 / CTA 방식 참고용" rows={2}
                   className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent bg-gray-50 placeholder-gray-400 resize-none" />
               </div>
               {(selectedFolderId && selectedFolderId !== 'uncat') && (
