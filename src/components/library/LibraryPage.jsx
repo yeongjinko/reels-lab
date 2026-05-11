@@ -782,6 +782,8 @@ export default function LibraryPage() {
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(null);
   const [movingItemId, setMovingItemId] = useState(null);
+  const [folderDeleteConfirm, setFolderDeleteConfirm] = useState(null);
+  const [folderDeleting, setFolderDeleting] = useState(false);
   const mediaInputRef = useRef(null);
 
   function handleGoAnalyze(item) {
@@ -839,8 +841,15 @@ export default function LibraryPage() {
     await updateDoc(doc(db, 'referenceFolders', id), { name });
   }
 
-  async function handleDeleteFolder(id) {
-    if (!confirm('이 폴더를 삭제하면 안의 카드는 미분류로 이동합니다. 계속할까요?')) return;
+  function handleDeleteFolder(id) {
+    const folder = folders.find(f => f.id === id);
+    setFolderDeleteConfirm({ id, name: folder?.name || '폴더' });
+  }
+
+  async function confirmDeleteFolder() {
+    if (!folderDeleteConfirm) return;
+    const { id } = folderDeleteConfirm;
+    setFolderDeleting(true);
     try {
       const subIds = folders.filter(f => f.parentId === id).map(f => f.id);
       const allIds = [id, ...subIds];
@@ -852,9 +861,12 @@ export default function LibraryPage() {
         await deleteDoc(doc(db, 'referenceFolders', fid));
       }
       if (allIds.includes(selectedFolderId)) setSelectedFolderId(null);
+      setFolderDeleteConfirm(null);
     } catch (e) {
       console.error('폴더 삭제 오류:', e);
       alert('폴더 삭제 중 오류가 발생했습니다.');
+    } finally {
+      setFolderDeleting(false);
     }
   }
 
@@ -1162,6 +1174,38 @@ export default function LibraryPage() {
                 </button>
                 <button onClick={closeForm} className="px-4 py-2.5 text-sm text-gray-500 hover:text-gray-700 transition-colors">취소</button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 폴더 삭제 확인 모달 */}
+      {folderDeleteConfirm && (
+        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-[70] flex items-center justify-center p-4" onClick={() => !folderDeleting && setFolderDeleteConfirm(null)}>
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm p-6" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-10 h-10 bg-red-100 rounded-full flex items-center justify-center flex-shrink-0">
+                <svg className="w-5 h-5 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                </svg>
+              </div>
+              <div>
+                <p className="text-sm font-bold text-gray-900">
+                  <span className="text-red-600">"{folderDeleteConfirm.name}"</span> 폴더를 삭제할까요?
+                </p>
+                <p className="text-xs text-gray-500 mt-0.5">폴더 안의 카드는 미분류로 이동됩니다.</p>
+              </div>
+            </div>
+            <div className="flex gap-2">
+              <button onClick={() => setFolderDeleteConfirm(null)} disabled={folderDeleting}
+                className="flex-1 py-2.5 text-sm text-gray-600 hover:text-gray-800 border border-gray-200 hover:bg-gray-50 rounded-xl transition-colors disabled:opacity-50">
+                취소
+              </button>
+              <button onClick={confirmDeleteFolder} disabled={folderDeleting}
+                className="flex-1 flex items-center justify-center gap-2 py-2.5 text-sm font-semibold text-white bg-red-500 hover:bg-red-600 disabled:bg-red-300 rounded-xl transition-colors">
+                {folderDeleting && <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />}
+                {folderDeleting ? '삭제 중...' : '삭제'}
+              </button>
             </div>
           </div>
         </div>
