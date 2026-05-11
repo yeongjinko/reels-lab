@@ -1161,6 +1161,13 @@ exports.extractScript = onCall(
     const { storagePath } = request.data;
     if (!storagePath) throw new HttpsError('invalid-argument', '영상 경로가 필요합니다.');
 
+    // ── 키 확인 (함수 진입 즉시) ──
+    const clientId = naverClientId.value()?.trim();
+    const clientSecret = naverClientSecret.value()?.trim();
+    console.log('CLIENT_ID:', clientId?.substring(0, 5), '/ LENGTH:', clientId?.length);
+    console.log('CLIENT_SECRET:', clientSecret?.substring(0, 5), '/ LENGTH:', clientSecret?.length);
+    if (!clientId || !clientSecret) throw new HttpsError('internal', 'Naver API 키가 설정되지 않았습니다.');
+
     const ts = Date.now();
     const videoPath = path.join(os.tmpdir(), `video_${ts}`);
     const audioPath = path.join(os.tmpdir(), `audio_${ts}.wav`);
@@ -1187,11 +1194,6 @@ exports.extractScript = onCall(
         throw new HttpsError('invalid-argument', '영상이 너무 깁니다. 60초 이하의 영상을 사용해주세요.');
       }
 
-      const clientId = naverClientId.value()?.trim();
-      const clientSecret = naverClientSecret.value()?.trim();
-      console.log('CLIENT_ID LENGTH:', clientId?.length);
-      console.log('CLIENT_SECRET LENGTH:', clientSecret?.length);
-      if (!clientId || !clientSecret) throw new HttpsError('internal', 'Naver API 키가 설정되지 않았습니다.');
       const text = await callNaverStt(audioBuffer, clientId, clientSecret);
       console.log('STT result length:', text?.length);
 
