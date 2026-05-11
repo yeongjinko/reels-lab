@@ -1,3 +1,11 @@
+const https = require('https');
+const fs = require('fs');
+const path = require('path');
+const os = require('os');
+const ffmpegInstaller = require('@ffmpeg-installer/ffmpeg');
+const ffmpeg = require('fluent-ffmpeg');
+ffmpeg.setFfmpegPath(ffmpegInstaller.path);
+
 const { onCall, HttpsError } = require('firebase-functions/v2/https');
 const { defineSecret } = require('firebase-functions/params');
 const { setGlobalOptions } = require('firebase-functions/v2');
@@ -1098,6 +1106,98 @@ ${fullTemplate}
       console.error('guessProduct error:', e?.message || e);
       if (e instanceof HttpsError) throw e;
       throw new HttpsError('internal', '상품 추측 중 오류가 발생했습니다.');
+    }
+  }
+);
+
+/* ── Naver Clova STT ── */
+const naverClientId = defineSecret('NAVER_CLIENT_ID');
+const naverClientSecret = defineSecret('NAVER_CLIENT_SECRET');
+
+function callNaverStt(buffer, clientId, clientSecret) {
+  return new Promise((resolve, reject) => {
+    const options = {
+      hostname: 'naveropenapi.apigw.ntruss.com',
+      path: '/recog/v1/stt?lang=Kor',
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/octet-stream',
+        'X-NCP-APIGW-API-KEY-ID': clientId,
+        'X-NCP-APIGW-API-KEY': clientSecret,
+        'Content-Length': buffer.length,
+      },
+    };
+    const req = https.request(options, (res) => {
+      let data = '';
+      res.on('data', chunk => { data += chunk; });
+      res.on('end', () => {
+        if (res.statusCode !== 200) {
+          return reject(new Error(`Naver STT error ${res.statusCode}: ${data}`));
+        }
+        try {
+          const json = JSON.parse(data);
+          resolve(json.text || '');
+        } catch {
+          reject(new Error('STT 응답 파싱 실패: ' + data));
+        }
+      });
+    });
+    req.on('error', reject);
+    req.write(buffer);
+    req.end();
+  });
+}
+
+exports.extractScript = onCall(
+  {
+    secrets: [naverClientId, naverClientSecret],
+    cors: true,
+    timeoutSeconds: 300,
+    memory: '1GiB',
+  },
+  async (request) => {
+    if (!request.auth) throw new HttpsError('unauthenticated', '로그인이 필요합니다.');
+    const { storagePath } = request.data;
+    if (!storagePath) throw new HttpsError('invalid-argument', '영상 경로가 필요합니다.');
+
+    const ts = Date.now();
+    const videoPath = path.join(os.tmpdir(), `video_${ts}`);
+    const audioPath = path.join(os.tmpdir(), `audio_${ts}.wav`);
+
+    try {
+      const bucket = admin.storage().bucket('reelscopy-3e18c.firebasestorage.app');
+      await bucket.file(storagePath).download({ destination: videoPath });
+      console.log('video downloaded:', videoPath);
+
+      await new Promise((resolve, reject) => {
+        ffmpeg(videoPath)
+          .audioFrequency(16000)
+          .audioChannels(1)
+          .audioCodec('pcm_s16le')
+          .format('wav')
+          .on('error', reject)
+          .on('end', resolve)
+          .save(audioPath);
+      });
+      console.log('audio extracted:', audioPath);
+
+      const audioBuffer = fs.readFileSync(audioPath);
+      if (audioBuffer.length > 200 * 1024 * 1024) {
+        throw new HttpsError('invalid-argument', '영상이 너무 깁니다. 60초 이하의 영상을 사용해주세요.');
+      }
+
+      const text = await callNaverStt(audioBuffer, naverClientId.value(), naverClientSecret.value());
+      console.log('STT result length:', text?.length);
+
+      return { success: true, text: text || '' };
+    } catch (e) {
+      console.error('extractScript error:', e?.message || e);
+      if (e instanceof HttpsError) throw e;
+      throw new HttpsError('internal', '대본 추출 중 오류가 발생했습니다: ' + (e?.message || ''));
+    } finally {
+      for (const p of [videoPath, audioPath]) {
+        try { fs.unlinkSync(p); } catch {}
+      }
     }
   }
 );

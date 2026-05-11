@@ -4,8 +4,9 @@ import {
   query, where, onSnapshot, serverTimestamp, getDocs,
 } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
+import { httpsCallable } from 'firebase/functions';
 import { useNavigate } from 'react-router-dom';
-import { db, storage } from '../../firebase/config';
+import { db, storage, functions } from '../../firebase/config';
 import { useApp } from '../../App';
 
 const TAG_STYLES = {
@@ -161,6 +162,9 @@ function DetailModal({ item, onClose, onGoAnalyze, onPlayMedia }) {
   const [scriptResetBanner, setScriptResetBanner] = useState(false);
   const [localItem, setLocalItem] = useState(item);
 
+  // STT 추출 상태
+  const [extractingScript, setExtractingScript] = useState(false);
+
   // 미디어 편집 상태
   const [pendingFile, setPendingFile] = useState(null);
   const [pendingType, setPendingType] = useState(null);
@@ -313,6 +317,26 @@ function DetailModal({ item, onClose, onGoAnalyze, onPlayMedia }) {
   const isVideo = localItem.mediaType === 'video' || (!localItem.mediaType && localItem.videoUrl);
   const isImage = localItem.mediaType === 'image';
   const hasMedia = !!(localItem.mediaUrl || localItem.videoUrl);
+
+  async function handleExtractDetailScript() {
+    const storagePath = localItem.mediaStoragePath || localItem.videoStoragePath;
+    if (!storagePath) return;
+    if (localItem.script?.trim() && !confirm('기존 대본을 덮어쓸까요?')) return;
+    setExtractingScript(true);
+    try {
+      const fn = httpsCallable(functions, 'extractScript');
+      const result = await fn({ storagePath });
+      if (result.data.text) {
+        setEditingField('script');
+        setEditValue(result.data.text);
+      }
+    } catch (e) {
+      console.error('STT 오류:', e);
+      alert('대본 추출 중 오류가 발생했습니다: ' + (e.message || '알 수 없는 오류'));
+    } finally {
+      setExtractingScript(false);
+    }
+  }
 
   return (
     <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={onClose}>
@@ -500,11 +524,26 @@ function DetailModal({ item, onClose, onGoAnalyze, onPlayMedia }) {
           <div>
             <div className="flex items-center justify-between mb-2">
               <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider">대본 전문</p>
-              {editingField !== 'script' && (
-                <button onClick={() => startEdit('script')} className="flex items-center gap-1 text-xs text-gray-400 hover:text-indigo-500 transition-colors">
-                  <PencilIcon /> 수정
-                </button>
-              )}
+              <div className="flex items-center gap-2">
+                {isVideo && (localItem.mediaStoragePath || localItem.videoStoragePath) && editingField !== 'script' && (
+                  <button
+                    onClick={handleExtractDetailScript}
+                    disabled={extractingScript}
+                    className="flex items-center gap-1 text-xs text-indigo-500 hover:text-indigo-700 disabled:text-indigo-300 transition-colors font-medium"
+                  >
+                    {extractingScript ? (
+                      <><div className="w-3 h-3 border border-indigo-400 border-t-transparent rounded-full animate-spin" />음성 인식 중...</>
+                    ) : (
+                      <><svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" /></svg>대본 자동 추출</>
+                    )}
+                  </button>
+                )}
+                {editingField !== 'script' && (
+                  <button onClick={() => startEdit('script')} className="flex items-center gap-1 text-xs text-gray-400 hover:text-indigo-500 transition-colors">
+                    <PencilIcon /> 수정
+                  </button>
+                )}
+              </div>
             </div>
             {editingField === 'script' ? (
               <div className="flex flex-col gap-2">
@@ -784,6 +823,8 @@ export default function LibraryPage() {
   const [movingItemId, setMovingItemId] = useState(null);
   const [folderDeleteConfirm, setFolderDeleteConfirm] = useState(null);
   const [folderDeleting, setFolderDeleting] = useState(false);
+  const [formExtracting, setFormExtracting] = useState(false);
+  const [formExtractUploaded, setFormExtractUploaded] = useState(null);
   const mediaInputRef = useRef(null);
 
   function handleGoAnalyze(item) {
@@ -880,11 +921,39 @@ export default function LibraryPage() {
     if (!file) return;
     setFormMediaFile(file);
     setFormMediaType(file.type.startsWith('video/') ? 'video' : 'image');
+    setFormExtractUploaded(null);
   }
 
   function clearMedia() {
+    if (formExtractUploaded) {
+      deleteObject(ref(storage, formExtractUploaded.path)).catch(() => {});
+      setFormExtractUploaded(null);
+    }
     setFormMediaFile(null); setFormMediaType(null);
     if (mediaInputRef.current) mediaInputRef.current.value = '';
+  }
+
+  async function handleExtractFormScript() {
+    if (!formMediaFile || !user) return;
+    setFormExtracting(true);
+    try {
+      let tempPath = formExtractUploaded?.path;
+      if (!tempPath) {
+        const ext = formMediaFile.name.split('.').pop().toLowerCase();
+        tempPath = `referenceMedia/${user.uid}/temp_extract_${Date.now()}/media.${ext}`;
+        await uploadBytes(ref(storage, tempPath), formMediaFile);
+        const tempUrl = await getDownloadURL(ref(storage, tempPath));
+        setFormExtractUploaded({ path: tempPath, url: tempUrl, ext });
+      }
+      const fn = httpsCallable(functions, 'extractScript');
+      const result = await fn({ storagePath: tempPath });
+      if (result.data.text) setFormScript(result.data.text);
+    } catch (e) {
+      console.error('STT 오류:', e);
+      alert('대본 추출 중 오류가 발생했습니다: ' + (e.message || '알 수 없는 오류'));
+    } finally {
+      setFormExtracting(false);
+    }
   }
 
   async function handleAdd() {
@@ -905,10 +974,19 @@ export default function LibraryPage() {
         const ext = formMediaFile.name.split('.').pop().toLowerCase();
         const basePath = `referenceMedia/${user.uid}/${docRef.id}`;
         setUploadProgress(15);
-        const mediaRef = ref(storage, `${basePath}/media.${ext}`);
-        await uploadBytes(mediaRef, formMediaFile);
-        const mediaUrl = await getDownloadURL(mediaRef);
-        setUploadProgress(60);
+
+        let mediaUrl, mediaStoragePath_final;
+        if (formExtractUploaded) {
+          mediaUrl = formExtractUploaded.url;
+          mediaStoragePath_final = formExtractUploaded.path;
+          setUploadProgress(60);
+        } else {
+          const mediaRef = ref(storage, `${basePath}/media.${ext}`);
+          await uploadBytes(mediaRef, formMediaFile);
+          mediaUrl = await getDownloadURL(mediaRef);
+          mediaStoragePath_final = `${basePath}/media.${ext}`;
+          setUploadProgress(60);
+        }
 
         let thumbnailUrl = null, thumbnailStoragePath = null;
         if (formMediaType === 'video') {
@@ -920,16 +998,18 @@ export default function LibraryPage() {
           }
         } else {
           thumbnailUrl = mediaUrl;
-          thumbnailStoragePath = `${basePath}/media.${ext}`;
+          thumbnailStoragePath = mediaStoragePath_final;
         }
         setUploadProgress(95);
         await updateDoc(doc(db, 'referenceLibrary', docRef.id), {
-          mediaType: formMediaType, mediaUrl, mediaStoragePath: `${basePath}/media.${ext}`,
+          mediaType: formMediaType, mediaUrl, mediaStoragePath: mediaStoragePath_final,
           thumbnailUrl, thumbnailStoragePath, videoUrl: formMediaType === 'video' ? mediaUrl : null,
         });
       }
 
-      setFormTitle(''); setFormLink(''); setFormScript(''); setFormMemo(''); clearMedia(); setShowForm(false);
+      setFormTitle(''); setFormLink(''); setFormScript(''); setFormMemo('');
+      setFormExtractUploaded(null);
+      clearMedia(); setShowForm(false);
     } catch (e) { console.error(e); }
     finally { setSaving(false); setUploadProgress(0); }
   }
@@ -948,6 +1028,10 @@ export default function LibraryPage() {
   }
 
   function closeForm() {
+    if (formExtractUploaded) {
+      deleteObject(ref(storage, formExtractUploaded.path)).catch(() => {});
+      setFormExtractUploaded(null);
+    }
     setShowForm(false); setFormTitle(''); setFormLink(''); setFormScript(''); setFormMemo(''); clearMedia();
   }
 
@@ -1119,14 +1203,16 @@ export default function LibraryPage() {
                   accept="image/jpeg,image/png,image/gif,.jpg,.jpeg,.png,.gif,video/mp4,video/quicktime,.mp4,.mov"
                   className="hidden" onChange={handleMediaFileChange} />
                 {formMediaFile ? (
-                  <div className="flex items-center gap-2 px-4 py-2.5 bg-indigo-50 border border-indigo-200 rounded-xl">
-                    <svg className="w-4 h-4 text-indigo-500 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={formMediaType === 'image' ? "M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" : "M15 10l4.553-2.069A1 1 0 0121 8.868v6.264a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"} />
-                    </svg>
-                    <span className="text-xs text-indigo-700 font-medium flex-1 truncate">{formMediaFile.name}</span>
-                    <button type="button" onClick={clearMedia} className="text-indigo-400 hover:text-indigo-600 flex-shrink-0 transition-colors">
-                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
-                    </button>
+                  <div className="flex flex-col gap-2">
+                    <div className="flex items-center gap-2 px-4 py-2.5 bg-indigo-50 border border-indigo-200 rounded-xl">
+                      <svg className="w-4 h-4 text-indigo-500 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={formMediaType === 'image' ? "M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" : "M15 10l4.553-2.069A1 1 0 0121 8.868v6.264a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"} />
+                      </svg>
+                      <span className="text-xs text-indigo-700 font-medium flex-1 truncate">{formMediaFile.name}</span>
+                      <button type="button" onClick={clearMedia} className="text-indigo-400 hover:text-indigo-600 flex-shrink-0 transition-colors">
+                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+                      </button>
+                    </div>
                   </div>
                 ) : (
                   <button type="button" onClick={() => mediaInputRef.current?.click()}
@@ -1137,7 +1223,23 @@ export default function LibraryPage() {
                 )}
               </div>
               <div>
-                <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1.5">대본 텍스트 <span className="text-red-400">*</span></label>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="text-xs font-semibold text-gray-500 uppercase tracking-wider">대본 텍스트 <span className="text-red-400">*</span></label>
+                  <button
+                    type="button"
+                    onClick={handleExtractFormScript}
+                    disabled={formExtracting || formMediaType !== 'video'}
+                    title={formMediaType !== 'video' ? '영상을 먼저 업로드하세요' : (formExtractUploaded ? '다시 추출' : '대본 자동 추출')}
+                    className={`flex items-center gap-1 text-xs font-semibold transition-colors ${formMediaType === 'video' && !formExtracting ? 'text-indigo-600 hover:text-indigo-800' : 'text-gray-300 cursor-not-allowed'}`}
+                  >
+                    {formExtracting ? (
+                      <><div className="w-3 h-3 border border-indigo-400 border-t-transparent rounded-full animate-spin" />음성 인식 중...</>
+                    ) : (
+                      <><svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" /></svg>
+                      {formExtractUploaded ? '다시 추출' : '대본 자동 추출'}</>
+                    )}
+                  </button>
+                </div>
                 <textarea value={formScript} onChange={e => setFormScript(e.target.value)}
                   placeholder="대본을 입력하세요" rows={6}
                   className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent bg-gray-50 placeholder-gray-400 resize-none" />
