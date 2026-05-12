@@ -90,15 +90,25 @@ function VideoScriptModal({ item, onClose }) {
   useEffect(() => {
     async function loadFreshUrl() {
       const storagePath = item.mediaStoragePath || item.videoStoragePath;
+      console.log('[VideoScriptModal] item.id:', item.id);
+      console.log('[VideoScriptModal] mediaUrl:', item.mediaUrl);
+      console.log('[VideoScriptModal] videoUrl:', item.videoUrl);
+      console.log('[VideoScriptModal] thumbnailUrl:', item.thumbnailUrl);
+      console.log('[VideoScriptModal] mediaStoragePath:', item.mediaStoragePath);
+      console.log('[VideoScriptModal] videoStoragePath:', item.videoStoragePath);
+      console.log('[VideoScriptModal] storagePath used:', storagePath);
       if (storagePath) {
         try {
           const url = await getDownloadURL(ref(storage, storagePath));
+          console.log('[VideoScriptModal] fresh URL:', url);
           setVideoSrc(url);
         } catch (e) {
-          console.error('getDownloadURL failed:', e);
+          console.error('[VideoScriptModal] getDownloadURL failed:', e.code, e.message);
+          console.log('[VideoScriptModal] falling back to stored URL:', item.mediaUrl || item.videoUrl);
           setVideoSrc(item.mediaUrl || item.videoUrl || null);
         }
       } else {
+        console.warn('[VideoScriptModal] no storagePath found, using stored URL:', item.mediaUrl || item.videoUrl);
         setVideoSrc(item.mediaUrl || item.videoUrl || null);
       }
       setVideoLoading(false);
@@ -174,7 +184,11 @@ function VideoScriptModal({ item, onClose }) {
               crossOrigin="anonymous"
               poster={item.thumbnailUrl}
               className="max-h-full max-w-full"
-              onError={() => setVideoError(true)}
+              onError={e => {
+                console.error('[VideoScriptModal] video onError:', e.target.error);
+                console.log('[VideoScriptModal] failed src:', videoSrc);
+                setVideoError(true);
+              }}
             />
           ) : (
             <p className="text-white/40 text-sm">영상이 없어요</p>
@@ -254,13 +268,22 @@ function DetailModal({ item, onClose, onGoAnalyze, onPlayMedia, folders, onMoveI
       setDetailVideoLoading(true);
       setDetailVideoError(false);
       const storagePath = item.mediaStoragePath || item.videoStoragePath;
+      console.log('[DetailModal] item.id:', item.id);
+      console.log('[DetailModal] mediaUrl:', item.mediaUrl);
+      console.log('[DetailModal] videoUrl:', item.videoUrl);
+      console.log('[DetailModal] thumbnailUrl:', item.thumbnailUrl);
+      console.log('[DetailModal] mediaStoragePath:', item.mediaStoragePath);
+      console.log('[DetailModal] videoStoragePath:', item.videoStoragePath);
+      console.log('[DetailModal] storagePath used:', storagePath);
       try {
         const url = storagePath
           ? await getDownloadURL(ref(storage, storagePath))
           : (item.mediaUrl || item.videoUrl || null);
+        console.log('[DetailModal] fresh URL:', url);
         setDetailVideoSrc(url);
       } catch (e) {
-        console.error('detail getDownloadURL failed:', e);
+        console.error('[DetailModal] getDownloadURL failed:', e.code, e.message);
+        console.log('[DetailModal] falling back to stored URL:', item.mediaUrl || item.videoUrl);
         setDetailVideoSrc(item.mediaUrl || item.videoUrl || null);
       }
       setDetailVideoLoading(false);
@@ -593,7 +616,11 @@ function DetailModal({ item, onClose, onGoAnalyze, onPlayMedia, folders, onMoveI
                       poster={localItem.thumbnailUrl}
                       className="w-full"
                       style={{ maxHeight: '300px' }}
-                      onError={() => setDetailVideoError(true)}
+                      onError={e => {
+                        console.error('[DetailModal] video onError:', e.target.error);
+                        console.log('[DetailModal] failed src:', detailVideoSrc);
+                        setDetailVideoError(true);
+                      }}
                     />
                   </div>
                 ) : null
