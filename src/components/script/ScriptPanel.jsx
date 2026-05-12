@@ -486,6 +486,69 @@ function HighlightedTextarea({ value, onChange, rows, placeholder }) {
   );
 }
 
+// ─── SaveModal ────────────────────────────────────────────────────────────────
+
+function SaveModal({ onConfirm, onClose }) {
+  const [topic, setTopic] = useState('');
+  const [status, setStatus] = useState('대기 중');
+
+  const statusStyles = {
+    '대기 중': 'bg-gray-100 text-gray-700 border-gray-300',
+    '게시 완료': 'bg-green-100 text-green-700 border-green-300',
+    '보류': 'bg-yellow-100 text-yellow-700 border-yellow-300',
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={onClose}>
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm" onClick={e => e.stopPropagation()}>
+        <div className="px-6 pt-5 pb-4 border-b border-gray-100">
+          <h3 className="font-bold text-gray-900 text-sm">보관함에 저장</h3>
+        </div>
+        <div className="px-6 py-5 flex flex-col gap-4">
+          <div>
+            <label className="text-xs font-semibold text-gray-500 mb-1.5 block">상품명/주제</label>
+            <input
+              value={topic}
+              onChange={e => setTopic(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') onConfirm(topic.trim(), status); }}
+              placeholder="예) 브랜드반전형 가성비 레깅스"
+              autoFocus
+              className="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-sm outline-none focus:ring-2 focus:ring-indigo-400"
+            />
+          </div>
+          <div>
+            <label className="text-xs font-semibold text-gray-500 mb-1.5 block">사용 여부</label>
+            <div className="flex gap-2">
+              {['대기 중', '게시 완료', '보류'].map(s => (
+                <button
+                  key={s}
+                  onClick={() => setStatus(s)}
+                  className={`flex-1 text-xs font-semibold py-2 rounded-xl border transition-colors ${
+                    status === s ? statusStyles[s] : 'bg-white text-gray-400 border-gray-200 hover:bg-gray-50'
+                  }`}
+                >
+                  {s}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+        <div className="px-6 pb-5 flex gap-2">
+          <button
+            onClick={() => onConfirm(topic.trim(), status)}
+            className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-2.5 rounded-xl text-sm transition-colors"
+          >
+            저장
+          </button>
+          <button onClick={onClose} className="px-5 py-2.5 text-sm text-gray-500 hover:text-gray-700 border border-gray-200 rounded-xl hover:bg-gray-50 transition-colors">
+            취소
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── ScriptPanel (main) ───────────────────────────────────────────────────────
 
 export default function ScriptPanel({ analysis, referenceText, referenceId, initialTemplateData }) {
@@ -525,6 +588,7 @@ export default function ScriptPanel({ analysis, referenceText, referenceId, init
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [toast, setToast] = useState('');
+  const [showSaveModal, setShowSaveModal] = useState(false);
 
   useEffect(() => {
     if (!referenceText || !analysis || !initialTemplateData || templateData) return;
@@ -768,8 +832,13 @@ export default function ScriptPanel({ analysis, referenceText, referenceId, init
     setTimeout(() => setCopied(false), 1500);
   }
 
-  async function handleSave() {
+  function handleSave() {
     if (!user || !completedScript) return;
+    setShowSaveModal(true);
+  }
+
+  async function handleConfirmSave(topic, status) {
+    setShowSaveModal(false);
     setSaving(true);
     try {
       await addDoc(collection(db, 'myScripts'), {
@@ -778,6 +847,10 @@ export default function ScriptPanel({ analysis, referenceText, referenceId, init
         script: completedScript,
         preview: completedScript.slice(0, 50),
         referenceId: referenceId || null,
+        hookType: templateData?.hookType || null,
+        topic: topic || null,
+        status: status || '대기 중',
+        performanceMemo: null,
       });
       setSaved(true);
       setToast('내 보관함에 저장됐어요');
@@ -804,6 +877,13 @@ export default function ScriptPanel({ analysis, referenceText, referenceId, init
           </svg>
           {toast}
         </div>
+      )}
+
+      {showSaveModal && (
+        <SaveModal
+          onConfirm={handleConfirmSave}
+          onClose={() => setShowSaveModal(false)}
+        />
       )}
 
       {isProductContextOpen && (

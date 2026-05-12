@@ -12,35 +12,26 @@ const PencilIcon = () => (
   </svg>
 );
 
+const STATUS_STYLES = {
+  '대기 중': { tag: 'bg-gray-100 text-gray-600', btn: 'bg-gray-100 text-gray-700 border-gray-300' },
+  '게시 완료': { tag: 'bg-green-100 text-green-700', btn: 'bg-green-100 text-green-700 border-green-300' },
+  '보류': { tag: 'bg-yellow-100 text-yellow-700', btn: 'bg-yellow-100 text-yellow-700 border-yellow-300' },
+};
+
 function ScriptDetailModal({ script, onClose }) {
+  const [localScript, setLocalScript] = useState(script);
   const [editingField, setEditingField] = useState(null);
   const [editValue, setEditValue] = useState('');
   const [saving, setSaving] = useState(false);
   const [copied, setCopied] = useState(false);
-  const [localScript, setLocalScript] = useState(script);
 
   useEffect(() => { setLocalScript(script); }, [script]);
 
-  function handleCopy() {
-    navigator.clipboard.writeText(localScript.script);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1500);
-  }
-
-  function startEdit(field) {
-    setEditingField(field);
-    setEditValue(field === 'title' ? (localScript.title || '') : localScript.script || '');
-  }
-
-  function cancelEdit() { setEditingField(null); setEditValue(''); }
-
-  async function saveEdit() {
-    if (!editValue.trim()) return;
+  async function saveField(field, value) {
     setSaving(true);
     try {
-      const updates = editingField === 'title'
-        ? { title: editValue.trim() }
-        : { script: editValue.trim(), preview: editValue.trim().slice(0, 50) };
+      const updates = { [field]: value };
+      if (field === 'script') updates.preview = value.slice(0, 50);
       await updateDoc(doc(db, 'myScripts', localScript.id), updates);
       setLocalScript(prev => ({ ...prev, ...updates }));
       setEditingField(null);
@@ -52,102 +43,167 @@ function ScriptDetailModal({ script, onClose }) {
     }
   }
 
-  const date = localScript.createdAt?.toDate?.()?.toLocaleDateString('ko-KR', {
-    year: 'numeric', month: 'short', day: 'numeric',
-  });
+  async function handleStatusChange(newStatus) {
+    setSaving(true);
+    try {
+      await updateDoc(doc(db, 'myScripts', localScript.id), { status: newStatus });
+      setLocalScript(prev => ({ ...prev, status: newStatus }));
+    } catch (e) {
+      console.error('status update failed:', e);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function startEdit(field) { setEditingField(field); setEditValue(localScript[field] || ''); }
+  function cancelEdit() { setEditingField(null); setEditValue(''); }
+  function handleCopy() {
+    navigator.clipboard.writeText(localScript.script);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
+  }
+
+  const date = localScript.createdAt?.toDate?.()?.toLocaleDateString('ko-KR', { year: 'numeric', month: 'short', day: 'numeric' });
+  const displayName = localScript.topic || localScript.title || '저장된 스크립트';
+  const currentStatus = localScript.status || '대기 중';
 
   return (
     <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={onClose}>
-      <div className="bg-white rounded-2xl shadow-xl w-full max-w-xl max-h-[88vh] flex flex-col" onClick={e => e.stopPropagation()}>
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-xl max-h-[90vh] flex flex-col" onClick={e => e.stopPropagation()}>
         {/* 헤더 */}
         <div className="px-6 pt-5 pb-4 border-b border-gray-100 flex-shrink-0">
           <div className="flex items-start justify-between gap-3">
             <div className="flex-1 min-w-0">
-              {editingField === 'title' ? (
+              {editingField === 'topic' ? (
                 <div className="flex items-center gap-2">
                   <input
                     value={editValue}
                     onChange={e => setEditValue(e.target.value)}
-                    onKeyDown={e => { if (e.key === 'Enter') saveEdit(); if (e.key === 'Escape') cancelEdit(); }}
+                    onKeyDown={e => { if (e.key === 'Enter') saveField('topic', editValue.trim()); if (e.key === 'Escape') cancelEdit(); }}
                     autoFocus
                     className="flex-1 text-sm font-bold border border-indigo-400 rounded-lg px-2.5 py-1 outline-none focus:ring-2 focus:ring-indigo-500"
                   />
-                  <button onClick={saveEdit} disabled={saving} className="text-xs bg-indigo-600 text-white px-2.5 py-1 rounded-lg font-semibold hover:bg-indigo-700 disabled:opacity-50 transition-colors">확인</button>
+                  <button onClick={() => saveField('topic', editValue.trim())} disabled={saving} className="text-xs bg-indigo-600 text-white px-2.5 py-1 rounded-lg font-semibold hover:bg-indigo-700 disabled:opacity-50 transition-colors">확인</button>
                   <button onClick={cancelEdit} className="text-xs text-gray-500 px-2 py-1 rounded-lg border border-gray-200 hover:bg-gray-50 transition-colors">취소</button>
                 </div>
               ) : (
                 <div className="flex items-center gap-1.5 group">
-                  <p className="text-sm font-bold text-gray-900">{localScript.title || '저장된 스크립트'}</p>
-                  <button onClick={() => startEdit('title')} className="opacity-0 group-hover:opacity-100 text-gray-300 hover:text-indigo-500 transition-all flex-shrink-0">
-                    <PencilIcon />
-                  </button>
+                  <p className="text-sm font-bold text-gray-900 truncate">{displayName}</p>
+                  <button onClick={() => startEdit('topic')} className="opacity-0 group-hover:opacity-100 text-gray-300 hover:text-indigo-500 transition-all flex-shrink-0"><PencilIcon /></button>
                 </div>
               )}
-              {date && <p className="text-xs text-gray-400 mt-0.5">{date}</p>}
+              <div className="flex items-center gap-2 mt-1 flex-wrap">
+                {localScript.hookType && (
+                  <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-orange-100 text-orange-600">{localScript.hookType}</span>
+                )}
+                {date && <p className="text-xs text-gray-400">{date}</p>}
+              </div>
             </div>
             <button onClick={onClose} className="text-gray-400 hover:text-gray-600 transition-colors flex-shrink-0">
-              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-              </svg>
+              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
             </button>
           </div>
         </div>
 
         {/* 콘텐츠 */}
-        <div className="flex-1 overflow-y-auto px-6 py-5">
-          <div className="flex items-center justify-between mb-2">
-            <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider">대본</p>
-            {editingField !== 'script' && (
-              <button onClick={() => startEdit('script')} className="flex items-center gap-1 text-xs text-gray-400 hover:text-indigo-500 transition-colors">
-                <PencilIcon />
-                수정
-              </button>
+        <div className="flex-1 overflow-y-auto px-6 py-5 flex flex-col gap-5">
+          {/* 사용 여부 */}
+          <div>
+            <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">사용 여부</p>
+            <div className="flex gap-2">
+              {Object.keys(STATUS_STYLES).map(s => (
+                <button
+                  key={s}
+                  onClick={() => handleStatusChange(s)}
+                  disabled={saving}
+                  className={`flex-1 text-xs font-semibold py-2 rounded-xl border transition-colors ${
+                    currentStatus === s ? STATUS_STYLES[s].btn : 'bg-white text-gray-400 border-gray-200 hover:bg-gray-50'
+                  }`}
+                >
+                  {s}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* 성과 메모 */}
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider">성과 메모</p>
+              {editingField !== 'performanceMemo' && (
+                <button onClick={() => startEdit('performanceMemo')} className="flex items-center gap-1 text-xs text-gray-400 hover:text-indigo-500 transition-colors"><PencilIcon />수정</button>
+              )}
+            </div>
+            {editingField === 'performanceMemo' ? (
+              <div className="flex flex-col gap-2">
+                <textarea
+                  value={editValue}
+                  onChange={e => setEditValue(e.target.value)}
+                  rows={3}
+                  autoFocus
+                  placeholder="조회수, 반응, 개선점 등을 메모하세요"
+                  className="w-full border border-indigo-400 rounded-xl px-4 py-3 text-sm text-gray-700 outline-none focus:ring-2 focus:ring-indigo-500 resize-none bg-gray-50"
+                />
+                <div className="flex gap-2">
+                  <button onClick={() => saveField('performanceMemo', editValue.trim())} disabled={saving} className="text-sm bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-300 text-white px-4 py-2 rounded-xl font-semibold transition-colors">저장</button>
+                  <button onClick={cancelEdit} className="text-sm text-gray-500 px-4 py-2 rounded-xl border border-gray-200 hover:bg-gray-50 transition-colors">취소</button>
+                </div>
+              </div>
+            ) : (
+              <div
+                onClick={() => startEdit('performanceMemo')}
+                className="bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm leading-relaxed min-h-[60px] cursor-pointer hover:border-indigo-200 hover:bg-indigo-50/30 transition-colors"
+              >
+                {localScript.performanceMemo
+                  ? <span className="text-gray-700 whitespace-pre-wrap">{localScript.performanceMemo}</span>
+                  : <span className="text-gray-300">메모를 입력하세요...</span>
+                }
+              </div>
             )}
           </div>
-          {editingField === 'script' ? (
-            <div className="flex flex-col gap-2">
-              <textarea
-                value={editValue}
-                onChange={e => setEditValue(e.target.value)}
-                rows={10}
-                autoFocus
-                className="w-full border border-indigo-400 rounded-xl px-4 py-3 text-sm text-gray-700 leading-relaxed outline-none focus:ring-2 focus:ring-indigo-500 resize-none bg-gray-50"
-              />
-              <div className="flex gap-2">
-                <button
-                  onClick={saveEdit}
-                  disabled={saving || !editValue.trim()}
-                  className="flex items-center gap-1.5 text-sm bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-300 text-white px-4 py-2 rounded-xl font-semibold transition-colors"
-                >
-                  {saving && <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />}
-                  저장
-                </button>
-                <button onClick={cancelEdit} className="text-sm text-gray-500 hover:text-gray-700 px-4 py-2 rounded-xl border border-gray-200 hover:bg-gray-50 transition-colors">
-                  취소
-                </button>
+
+          {/* 대본 */}
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider">대본</p>
+              {editingField !== 'script' && (
+                <button onClick={() => startEdit('script')} className="flex items-center gap-1 text-xs text-gray-400 hover:text-indigo-500 transition-colors"><PencilIcon />수정</button>
+              )}
+            </div>
+            {editingField === 'script' ? (
+              <div className="flex flex-col gap-2">
+                <textarea
+                  value={editValue}
+                  onChange={e => setEditValue(e.target.value)}
+                  rows={10}
+                  autoFocus
+                  className="w-full border border-indigo-400 rounded-xl px-4 py-3 text-sm text-gray-700 leading-relaxed outline-none focus:ring-2 focus:ring-indigo-500 resize-none bg-gray-50"
+                />
+                <div className="flex gap-2">
+                  <button onClick={() => saveField('script', editValue.trim())} disabled={saving || !editValue.trim()} className="flex items-center gap-1.5 text-sm bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-300 text-white px-4 py-2 rounded-xl font-semibold transition-colors">
+                    {saving && <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />}
+                    저장
+                  </button>
+                  <button onClick={cancelEdit} className="text-sm text-gray-500 px-4 py-2 rounded-xl border border-gray-200 hover:bg-gray-50 transition-colors">취소</button>
+                </div>
               </div>
-            </div>
-          ) : (
-            <div className="bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm text-gray-700 leading-relaxed whitespace-pre-wrap">
-              {localScript.script}
-            </div>
-          )}
+            ) : (
+              <div className="bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm text-gray-700 leading-relaxed whitespace-pre-wrap">
+                {localScript.script}
+              </div>
+            )}
+          </div>
         </div>
 
         {/* 하단 */}
         <div className="px-6 py-4 border-t border-gray-100 flex-shrink-0 flex gap-2">
-          <button
-            onClick={handleCopy}
-            className="flex-1 flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-2.5 rounded-xl transition-colors text-sm"
-          >
+          <button onClick={handleCopy} className="flex-1 flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-2.5 rounded-xl transition-colors text-sm">
             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
             </svg>
             {copied ? '복사됨 ✓' : '복사'}
           </button>
-          <button onClick={onClose} className="px-5 py-2.5 text-sm text-gray-500 hover:text-gray-700 border border-gray-200 rounded-xl hover:bg-gray-50 transition-colors">
-            닫기
-          </button>
+          <button onClick={onClose} className="px-5 py-2.5 text-sm text-gray-500 hover:text-gray-700 border border-gray-200 rounded-xl hover:bg-gray-50 transition-colors">닫기</button>
         </div>
       </div>
     </div>
@@ -405,26 +461,39 @@ export default function ArchivePage() {
             </div>
           ) : (
             <div className="grid grid-cols-3 lg:grid-cols-4 gap-3">
-              {filteredScripts.map(script => (
-                <div
-                  key={script.id}
-                  onClick={() => setDetailScript(script)}
-                  className="bg-white border border-gray-200 rounded-xl p-3 flex flex-col gap-2 cursor-pointer hover:shadow-md hover:border-indigo-200 transition-all group"
-                >
-                  {/* 제목 */}
-                  <p className="text-xs font-bold text-gray-800 truncate">
-                    {script.title || (script.script || '').split('\n').filter(l => l.trim())[0]?.slice(0, 40) || '저장된 스크립트'}
-                  </p>
+              {filteredScripts.map(script => {
+                const displayName = script.topic || script.title || (script.script || '').split('\n').filter(l => l.trim())[0]?.slice(0, 40) || '저장된 스크립트';
+                const currentStatus = script.status || '대기 중';
+                const tagStyle = STATUS_STYLES[currentStatus]?.tag || STATUS_STYLES['대기 중'].tag;
+                const cardDate = script.createdAt?.toDate?.()?.toLocaleDateString('ko-KR', { month: 'short', day: 'numeric' });
 
-                  {/* 80자 미리보기 */}
-                  <p className="text-[11px] text-gray-500 leading-relaxed">
-                    {(script.script || '').slice(0, 80)}{(script.script?.length ?? 0) > 80 ? '…' : ''}
-                  </p>
+                return (
+                  <div
+                    key={script.id}
+                    onClick={() => setDetailScript(script)}
+                    className="bg-white border border-gray-200 rounded-xl p-3.5 flex flex-col gap-2 cursor-pointer hover:shadow-md hover:border-indigo-200 transition-all group"
+                  >
+                    {/* 상단: topic + hookType badge */}
+                    <div className="flex items-start justify-between gap-1.5">
+                      <p className="text-xs font-bold text-gray-800 flex-1 min-w-0 line-clamp-2 leading-snug">{displayName}</p>
+                      {script.hookType && (
+                        <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded-full bg-orange-100 text-orange-600 flex-shrink-0 whitespace-nowrap leading-none mt-0.5">{script.hookType}</span>
+                      )}
+                    </div>
 
-                  {/* 액션 버튼 */}
-                  <div className="flex items-center justify-between gap-1 mt-auto">
-                    <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0 ml-auto">
-                      {/* 폴더 이동 */}
+                    {/* status + date */}
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${tagStyle}`}>{currentStatus}</span>
+                      {cardDate && <span className="text-[10px] text-gray-400">{cardDate}</span>}
+                    </div>
+
+                    {/* performanceMemo or script preview */}
+                    <p className="text-[11px] text-gray-400 leading-relaxed line-clamp-2">
+                      {script.performanceMemo || ((script.script || '').slice(0, 60) + ((script.script?.length ?? 0) > 60 ? '…' : ''))}
+                    </p>
+
+                    {/* 액션 버튼 */}
+                    <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity mt-auto">
                       <div className="relative">
                         <button
                           onClick={e => { e.stopPropagation(); setMovingScriptId(movingScriptId === script.id ? null : script.id); }}
@@ -435,10 +504,7 @@ export default function ArchivePage() {
                           </svg>
                         </button>
                         {movingScriptId === script.id && (
-                          <div
-                            className="absolute right-0 top-7 z-20 bg-white border border-gray-200 rounded-xl shadow-lg py-1 min-w-[130px]"
-                            onClick={e => e.stopPropagation()}
-                          >
+                          <div className="absolute right-0 top-7 z-20 bg-white border border-gray-200 rounded-xl shadow-lg py-1 min-w-[130px]" onClick={e => e.stopPropagation()}>
                             <button onClick={() => handleMoveScript(script.id, null)} className="w-full text-left px-3 py-1.5 text-xs hover:bg-gray-50 text-gray-600">미분류</button>
                             {folders.map(f => (
                               <button key={f.id} onClick={() => handleMoveScript(script.id, f.id)} className={`w-full text-left px-3 py-1.5 text-xs hover:bg-gray-50 ${script.folderId === f.id ? 'text-indigo-600 font-semibold' : 'text-gray-600'}`}>{f.name}</button>
@@ -446,7 +512,6 @@ export default function ArchivePage() {
                           </div>
                         )}
                       </div>
-                      {/* 삭제 */}
                       <button
                         onClick={e => { e.stopPropagation(); handleDelete(script.id); }}
                         disabled={deleting === script.id}
@@ -459,8 +524,8 @@ export default function ArchivePage() {
                       </button>
                     </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>
