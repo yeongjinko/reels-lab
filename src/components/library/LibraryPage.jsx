@@ -83,6 +83,44 @@ function VideoScriptModal({ item, onClose }) {
   const [script, setScript] = useState(item.script || '');
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [videoSrc, setVideoSrc] = useState(null);
+  const [videoLoading, setVideoLoading] = useState(true);
+  const [videoError, setVideoError] = useState(false);
+
+  useEffect(() => {
+    async function loadFreshUrl() {
+      const storagePath = item.mediaStoragePath || item.videoStoragePath;
+      if (storagePath) {
+        try {
+          const url = await getDownloadURL(ref(storage, storagePath));
+          setVideoSrc(url);
+        } catch (e) {
+          console.error('getDownloadURL failed:', e);
+          setVideoSrc(item.mediaUrl || item.videoUrl || null);
+        }
+      } else {
+        setVideoSrc(item.mediaUrl || item.videoUrl || null);
+      }
+      setVideoLoading(false);
+    }
+    loadFreshUrl();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function retryLoad() {
+    setVideoError(false);
+    setVideoLoading(true);
+    const storagePath = item.mediaStoragePath || item.videoStoragePath;
+    try {
+      const url = storagePath
+        ? await getDownloadURL(ref(storage, storagePath))
+        : (item.mediaUrl || item.videoUrl || null);
+      setVideoSrc(url);
+    } catch (e) {
+      console.error('retry getDownloadURL failed:', e);
+      setVideoSrc(item.mediaUrl || item.videoUrl || null);
+    }
+    setVideoLoading(false);
+  }
 
   async function handleSave() {
     setSaving(true);
@@ -109,13 +147,38 @@ function VideoScriptModal({ item, onClose }) {
       >
         {/* 왼쪽: 영상 */}
         <div className="flex-1 bg-black flex items-center justify-center min-w-0">
-          <video
-            src={item.mediaUrl || item.videoUrl}
-            controls
-            autoPlay
-            poster={item.thumbnailUrl}
-            className="max-h-full max-w-full"
-          />
+          {videoLoading ? (
+            <div className="flex flex-col items-center gap-3">
+              <div className="w-8 h-8 border-2 border-white/50 border-t-transparent rounded-full animate-spin" />
+              <p className="text-white/50 text-sm">영상 로딩 중...</p>
+            </div>
+          ) : videoError ? (
+            <div className="flex flex-col items-center gap-3 p-6">
+              <svg className="w-10 h-10 text-white/30" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
+              </svg>
+              <p className="text-white/60 text-sm">영상을 불러올 수 없어요</p>
+              <button
+                onClick={retryLoad}
+                className="text-xs text-white bg-white/20 hover:bg-white/30 px-4 py-2 rounded-xl transition-colors"
+              >
+                다시 시도
+              </button>
+            </div>
+          ) : videoSrc ? (
+            <video
+              key={videoSrc}
+              src={videoSrc}
+              controls
+              autoPlay
+              crossOrigin="anonymous"
+              poster={item.thumbnailUrl}
+              className="max-h-full max-w-full"
+              onError={() => setVideoError(true)}
+            />
+          ) : (
+            <p className="text-white/40 text-sm">영상이 없어요</p>
+          )}
         </div>
 
         {/* 오른쪽: 대본 */}
@@ -177,7 +240,49 @@ function DetailModal({ item, onClose, onGoAnalyze, onPlayMedia, folders, onMoveI
   const mediaEditRef = useRef(null);
   const [folderDropdownOpen, setFolderDropdownOpen] = useState(false);
 
+  // 인라인 영상 재생 상태
+  const [detailVideoSrc, setDetailVideoSrc] = useState(null);
+  const [detailVideoLoading, setDetailVideoLoading] = useState(false);
+  const [detailVideoError, setDetailVideoError] = useState(false);
+
   useEffect(() => { setLocalItem(item); }, [item]);
+
+  const isVideoItem = item.mediaType === 'video' || (!item.mediaType && item.videoUrl);
+  useEffect(() => {
+    if (!isVideoItem) return;
+    async function loadDetailVideoUrl() {
+      setDetailVideoLoading(true);
+      setDetailVideoError(false);
+      const storagePath = item.mediaStoragePath || item.videoStoragePath;
+      try {
+        const url = storagePath
+          ? await getDownloadURL(ref(storage, storagePath))
+          : (item.mediaUrl || item.videoUrl || null);
+        setDetailVideoSrc(url);
+      } catch (e) {
+        console.error('detail getDownloadURL failed:', e);
+        setDetailVideoSrc(item.mediaUrl || item.videoUrl || null);
+      }
+      setDetailVideoLoading(false);
+    }
+    loadDetailVideoUrl();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function retryDetailVideo() {
+    setDetailVideoError(false);
+    setDetailVideoLoading(true);
+    const storagePath = localItem.mediaStoragePath || localItem.videoStoragePath;
+    try {
+      const url = storagePath
+        ? await getDownloadURL(ref(storage, storagePath))
+        : (localItem.mediaUrl || localItem.videoUrl || null);
+      setDetailVideoSrc(url);
+    } catch (e) {
+      console.error('retry detail getDownloadURL failed:', e);
+      setDetailVideoSrc(localItem.mediaUrl || localItem.videoUrl || null);
+    }
+    setDetailVideoLoading(false);
+  }
 
   function handleGoAnalyze() { onGoAnalyze(localItem); }
   function startEdit(field) {
@@ -461,15 +566,37 @@ function DetailModal({ item, onClose, onGoAnalyze, onPlayMedia, folders, onMoveI
           <div>
             {hasMedia && (
               isVideo ? (
-                <div className="bg-black rounded-xl overflow-hidden mb-2">
-                  <video
-                    src={localItem.mediaUrl || localItem.videoUrl}
-                    controls
-                    poster={localItem.thumbnailUrl}
-                    className="w-full"
-                    style={{ maxHeight: '300px' }}
-                  />
-                </div>
+                detailVideoLoading ? (
+                  <div className="bg-black rounded-xl overflow-hidden mb-2 flex items-center justify-center" style={{ minHeight: '120px' }}>
+                    <div className="flex flex-col items-center gap-2">
+                      <div className="w-6 h-6 border-2 border-white/40 border-t-transparent rounded-full animate-spin" />
+                      <p className="text-white/40 text-xs">영상 로딩 중...</p>
+                    </div>
+                  </div>
+                ) : detailVideoError ? (
+                  <div className="bg-black rounded-xl overflow-hidden mb-2 flex flex-col items-center justify-center gap-2 py-8">
+                    <p className="text-white/60 text-xs">영상을 불러올 수 없어요</p>
+                    <button
+                      onClick={retryDetailVideo}
+                      className="text-xs text-white bg-white/20 hover:bg-white/30 px-3 py-1.5 rounded-lg transition-colors"
+                    >
+                      다시 시도
+                    </button>
+                  </div>
+                ) : detailVideoSrc ? (
+                  <div className="bg-black rounded-xl overflow-hidden mb-2">
+                    <video
+                      key={detailVideoSrc}
+                      src={detailVideoSrc}
+                      controls
+                      crossOrigin="anonymous"
+                      poster={localItem.thumbnailUrl}
+                      className="w-full"
+                      style={{ maxHeight: '300px' }}
+                      onError={() => setDetailVideoError(true)}
+                    />
+                  </div>
+                ) : null
               ) : (
                 <div className="relative bg-black rounded-xl overflow-hidden cursor-pointer group mb-2" style={{ aspectRatio: '3/4' }} onClick={onPlayMedia}>
                   {localItem.thumbnailUrl ? (
@@ -1286,7 +1413,7 @@ export default function LibraryPage() {
                 ) : (
                   <div
                     onDragOver={e => { e.preventDefault(); setIsDragOver(true); }}
-                    onDragLeave={e => { if (!e.currentTarget.contains(e.relatedTarget)) setIsDragOver(false); }}
+                    onDragLeave={() => setIsDragOver(false)}
                     onDrop={e => {
                       e.preventDefault();
                       setIsDragOver(false);
@@ -1299,17 +1426,11 @@ export default function LibraryPage() {
                       setFormMediaPreviewUrl(URL.createObjectURL(file));
                     }}
                     onClick={() => mediaInputRef.current?.click()}
-                    className={`w-full flex flex-col items-center justify-center gap-2 border-2 border-dashed rounded-xl py-8 transition-all cursor-pointer select-none ${isDragOver ? 'border-indigo-400 bg-indigo-50 scale-[1.01]' : 'border-gray-200 hover:border-indigo-300 hover:bg-gray-50'}`}
+                    className={`w-full flex flex-col items-center justify-center gap-1.5 border-2 border-dashed rounded-xl py-6 transition-colors cursor-pointer ${isDragOver ? 'border-indigo-400 bg-indigo-50 text-indigo-500' : 'border-gray-200 hover:border-indigo-300 hover:bg-indigo-50 text-gray-400 hover:text-indigo-500'}`}
                   >
-                    <svg className={`w-8 h-8 transition-colors ${isDragOver ? 'text-indigo-400' : 'text-gray-300'}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
-                    </svg>
-                    <div className="text-center">
-                      <p className={`text-sm font-medium transition-colors ${isDragOver ? 'text-indigo-600' : 'text-gray-500'}`}>
-                        {isDragOver ? '여기에 놓으세요' : '클릭하거나 파일을 여기에 드래그하세요'}
-                      </p>
-                      <p className="text-xs text-gray-300 mt-0.5">jpg, png, gif, mp4, mov</p>
-                    </div>
+                    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
+                    <span className="text-sm font-medium">이미지 또는 영상 업로드</span>
+                    <span className="text-xs text-gray-300">또는 드래그 앤 드롭</span>
                   </div>
                 )}
               </div>
