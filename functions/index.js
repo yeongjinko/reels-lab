@@ -3,12 +3,17 @@ const { defineSecret } = require('firebase-functions/params');
 const { setGlobalOptions } = require('firebase-functions/v2');
 const Anthropic = require('@anthropic-ai/sdk');
 const admin = require('firebase-admin');
+const OpenAI = require('openai');
+const os = require('os');
+const path = require('path');
+const fs = require('fs');
 
 setGlobalOptions({ region: 'asia-northeast3' });
 
 admin.initializeApp();
 
 const anthropicApiKey = defineSecret('ANTHROPIC_API_KEY');
+const openaiApiKey = defineSecret('OPENAI_API_KEY');
 
 const MODEL = 'claude-sonnet-4-6';
 
@@ -1098,6 +1103,61 @@ ${fullTemplate}
       console.error('guessProduct error:', e?.message || e);
       if (e instanceof HttpsError) throw e;
       throw new HttpsError('internal', '상품 추측 중 오류가 발생했습니다.');
+    }
+  }
+);
+
+exports.extractScript = onCall(
+  { secrets: [openaiApiKey, anthropicApiKey], memory: '1GiB', timeoutSeconds: 300, cors: true },
+  async (request) => {
+    if (!request.auth) throw new HttpsError('unauthenticated', '로그인이 필요합니다.');
+    const { storagePath } = request.data;
+    if (!storagePath) throw new HttpsError('invalid-argument', 'storagePath가 필요합니다.');
+
+    const tempFilePath = path.join(os.tmpdir(), `extract_${Date.now()}.mp4`);
+
+    try {
+      // Firebase Storage에서 파일 다운로드
+      const bucket = admin.storage().bucket();
+      await bucket.file(storagePath).download({ destination: tempFilePath });
+
+      // Whisper로 음성 → 텍스트
+      const openai = new OpenAI({ apiKey: openaiApiKey.value() });
+      const transcription = await openai.audio.transcriptions.create({
+        file: fs.createReadStream(tempFilePath),
+        model: 'whisper-1',
+        language: 'ko',
+        response_format: 'text',
+      });
+
+      const rawText = (typeof transcription === 'string' ? transcription : transcription.text || '').trim();
+      if (!rawText) return { text: '' };
+
+      // Claude로 의미 단위 줄바꿈 후처리
+      const client = new Anthropic({ apiKey: anthropicApiKey.value() });
+      const message = await client.messages.create({
+        model: MODEL,
+        max_tokens: 2048,
+        messages: [{
+          role: 'user',
+          content: `아래 릴스 대본을 의미 단위로 줄바꿈해줘.
+문장이나 의미 단위로 끊어서 엔터로 구분해줘.
+내용은 절대 바꾸지 말고 줄바꿈만 추가해.
+
+대본: ${rawText}`,
+        }],
+      });
+
+      const formattedText = message.content[0].text.trim();
+      return { text: formattedText };
+    } catch (e) {
+      console.error('extractScript error:', e?.message || e);
+      if (e instanceof HttpsError) throw e;
+      throw new HttpsError('internal', '대본 추출 중 오류가 발생했습니다: ' + (e?.message || '알 수 없는 오류'));
+    } finally {
+      if (fs.existsSync(tempFilePath)) {
+        try { fs.unlinkSync(tempFilePath); } catch {}
+      }
     }
   }
 );
