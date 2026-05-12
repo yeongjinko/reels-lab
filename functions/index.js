@@ -1,12 +1,16 @@
+const fs = require('fs');
+const path = require('path');
+const os = require('os');
+const ffmpegInstaller = require('@ffmpeg-installer/ffmpeg');
+const ffmpeg = require('fluent-ffmpeg');
+ffmpeg.setFfmpegPath(ffmpegInstaller.path);
+
 const { onCall, HttpsError } = require('firebase-functions/v2/https');
 const { defineSecret } = require('firebase-functions/params');
 const { setGlobalOptions } = require('firebase-functions/v2');
 const Anthropic = require('@anthropic-ai/sdk');
 const admin = require('firebase-admin');
 const OpenAI = require('openai');
-const os = require('os');
-const path = require('path');
-const fs = require('fs');
 
 setGlobalOptions({ region: 'asia-northeast3' });
 
@@ -1112,25 +1116,43 @@ exports.extractScript = onCall(
   async (request) => {
     if (!request.auth) throw new HttpsError('unauthenticated', '로그인이 필요합니다.');
     const { storagePath } = request.data;
-    if (!storagePath) throw new HttpsError('invalid-argument', 'storagePath가 필요합니다.');
+    if (!storagePath) throw new HttpsError('invalid-argument', '영상 경로가 필요합니다.');
 
-    const tempFilePath = path.join(os.tmpdir(), `extract_${Date.now()}.mp4`);
+    const ts = Date.now();
+    const videoPath = path.join(os.tmpdir(), `video_${ts}`);
+    const audioPath = path.join(os.tmpdir(), `audio_${ts}.wav`);
 
     try {
-      // Firebase Storage에서 파일 다운로드
-      const bucket = admin.storage().bucket();
-      await bucket.file(storagePath).download({ destination: tempFilePath });
+      // Firebase Storage에서 영상 다운로드
+      const bucket = admin.storage().bucket('reelscopy-3e18c.firebasestorage.app');
+      await bucket.file(storagePath).download({ destination: videoPath });
+
+      // ffmpeg로 오디오 추출 (Whisper 최적화: 16kHz mono WAV)
+      await new Promise((resolve, reject) => {
+        ffmpeg(videoPath)
+          .audioFrequency(16000)
+          .audioChannels(1)
+          .audioCodec('pcm_s16le')
+          .format('wav')
+          .on('error', reject)
+          .on('end', resolve)
+          .save(audioPath);
+      });
+
+      const audioStat = fs.statSync(audioPath);
+      if (audioStat.size > 25 * 1024 * 1024) {
+        throw new HttpsError('invalid-argument', '오디오 파일이 너무 큽니다. 25MB 이하의 영상을 사용해주세요.');
+      }
 
       // Whisper로 음성 → 텍스트
       const openai = new OpenAI({ apiKey: openaiApiKey.value() });
       const transcription = await openai.audio.transcriptions.create({
-        file: fs.createReadStream(tempFilePath),
+        file: fs.createReadStream(audioPath),
         model: 'whisper-1',
         language: 'ko',
-        response_format: 'text',
       });
 
-      const rawText = (typeof transcription === 'string' ? transcription : transcription.text || '').trim();
+      const rawText = (transcription.text || '').trim();
       if (!rawText) return { text: '' };
 
       // Claude로 의미 단위 줄바꿈 후처리
@@ -1148,15 +1170,14 @@ exports.extractScript = onCall(
         }],
       });
 
-      const formattedText = message.content[0].text.trim();
-      return { text: formattedText };
+      return { text: message.content[0].text.trim() };
     } catch (e) {
       console.error('extractScript error:', e?.message || e);
       if (e instanceof HttpsError) throw e;
-      throw new HttpsError('internal', '대본 추출 중 오류가 발생했습니다: ' + (e?.message || '알 수 없는 오류'));
+      throw new HttpsError('internal', '대본 추출 중 오류가 발생했습니다: ' + (e?.message || ''));
     } finally {
-      if (fs.existsSync(tempFilePath)) {
-        try { fs.unlinkSync(tempFilePath); } catch {}
+      for (const p of [videoPath, audioPath]) {
+        try { fs.unlinkSync(p); } catch {}
       }
     }
   }

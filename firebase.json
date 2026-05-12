@@ -8,6 +8,7 @@
     "indexes": "firestore.indexes.json"
   },
   "storage": {
+    "bucket": "reelscopy-3e18c.firebasestorage.app",
     "rules": "storage.rules"
   },
   "hosting": {

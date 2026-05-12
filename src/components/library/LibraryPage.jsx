@@ -1247,7 +1247,7 @@ export default function LibraryPage() {
               <div>
                 <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1.5">콘텐츠 특징 <span className="text-red-400">*</span></label>
                 <input type="text" value={formTitle} onChange={e => setFormTitle(e.target.value)}
-                  placeholder="" autoFocus
+                  placeholder="예) 브랜드반전형 가성비 레깅스 / 검증 꿀팁 공유형 팬츠" autoFocus
                   className="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent" />
               </div>
               <div>
